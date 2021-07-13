@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 #
-# harvest_cp_phsen.sh
+# combine_datasets.sh
 #
-# Harvest the phsen data from all of the OOI Coastal Endurance moorings. Data
-# sets include telemetered, recovered host and instrument data. Data is
-# downloaded from OOI Net and reworked to create a cleaner and more consistent
-# set of files named and organized by the mooring, mooring sub-location, data
-# delivery method and deployment.
+# Combines the data from the multiple sources (includes telemetered, recovered
+# host and recovered instrument data) into a single dataset with common
+# parameters and timestep.
 #
-# C. Wingard, 2019-07-22 -- Initial code
+# C. Wingard, 2020-02-15 -- Initial code
 
 # set the base python command, using the ooi environments for all subsequent
 # processing

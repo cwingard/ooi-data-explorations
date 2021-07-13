@@ -6,7 +6,6 @@
     M2M interface
 """
 import argparse
-import collections
 import netrc
 import numpy as np
 import os
@@ -20,9 +19,9 @@ import datetime
 import pandas as pd
 
 from bs4 import BeautifulSoup
-from tqdm import tqdm
-
+from collections.abc import Mapping
 from requests.adapters import HTTPAdapter
+from tqdm import tqdm
 from urllib3.util import Retry
 
 # setup constants used to access the data from the different M2M interfaces
@@ -638,11 +637,14 @@ def m2m_request(site, node, sensor, method, stream, start=None, stop=None):
 
 def m2m_collect(data, tag='.*\\.nc$'):
     """
-    Use a regex tag combined with the results of the M2M data request to collect the data from the THREDDS catalog.
-    Collected data is gathered into an xarray dataset for further processing.
+    Use a regex tag combined with the results of the M2M data request to
+    collect the data from the THREDDS catalog. Collected data is gathered
+    into an xarray dataset for further processing.
 
-    :param data: JSON object returned from M2M data request with details on where the data is to be found for download
-    :param tag: regex tag to use in discriminating the data files, so we only collect the correct ones
+    :param data: JSON object returned from M2M data request with details on
+        where the data is to be found for download
+    :param tag: regex tag to use in discriminating the data files, so we only
+        collect the correct ones
     :return: the collected data as an xarray dataset
     """
     # Create a list of the files from the request above using a simple regex as a tag to discriminate the files
@@ -664,27 +666,112 @@ def m2m_collect(data, tag='.*\\.nc$'):
     # merge the frames into a single data set, preserving global attributes from the first file if more than one.
     m2m = frames[0]
     if len(frames) > 1:
-        try:
-            # concatenation handles 99% of the cases
-            m2m = xr.concat(frames, dim='time')
-        except ValueError:  # unless there are missing variables ...
-            for i in range(1, len(frames)):
+        for idx, frame in enumerate(frames):
+            try:
+                # concatenation handles 99% of the cases
+                m2m = xr.concat([m2m, frame], dim='time')
+            except ValueError:
                 try:
-                    # merging will address most of the remaining cases
-                    m2m = m2m.merge(frames[i])
+                    # try merging the data, usually one of the data files is missing a variable from a co-located
+                    # sensor that the system was unable to find
+                    _, index = np.unique(m2m['time'], return_index=True)
+                    m2m = m2m.isel(time=index)
+                    m2m = m2m.merge(frame, compat='override')
                 except ValueError:
-                    # but sometimes there just really is something wrong with a dataset
-                    message = "Corrupted data in file {} of {}, skipping merge of this file".format(
-                        i+1, len(frames))
+                    # something is just not right with this data file
+                    message = "Corrupted data in file {} of {}, skipping merge of this file".format(idx + 1, len(frames))
                     warnings.warn(message)
 
-    m2m = m2m.sortby('deployment')
+    m2m = m2m.sortby(['deployment', 'time'])
     m2m.attrs['time_coverage_start'] = ('%sZ' % m2m.time.min().values)
     m2m.attrs['time_coverage_end'] = ('%sZ' % m2m.time.max().values)
-    m2m.attrs['time_coverage_resolution'] = ('P%.2fS' % (
-        np.mean(m2m.time.diff('time').values).astype(float) / 1e9))
+    m2m.attrs['time_coverage_resolution'] = ('P%.2fS' % (np.mean(m2m.time.diff('time').values).astype(float) / 1e9))
 
     return m2m
+
+
+def load_gc_thredds(site, node, sensor, method, stream, tag='.*\\.nc$'):
+    """
+    Download data from the OOI Gold Copy THREDDS catalog, using the reference
+    designator parameters to select the catalog of interest and the regex tag
+    to select the NetCDF files of interest. In most cases, the default tag
+    can be used, however for instruments that require data from a co-located
+    sensor, a more detailed regex tag will be required to insure that only data
+    files from the instrument of interest are loaded.
+
+    :param site: Site designator, extracted from the first part of the
+        reference designator
+    :param node: Node designator, extracted from the second part of the
+        reference designator
+    :param sensor: Sensor designator, extracted from the third and fourth part
+        of the reference designator
+    :param method: Delivery method for the data (either telemetered,
+        recovered_host or recovered_inst)
+    :param stream: Stream name that contains the data of interest
+    :param tag: regex pattern to select the NetCDF files to download
+    :return data: All of the data, combined into a single dataset
+    """
+    # download the data from the Gold Copy THREDDS server
+    dataset_id = '-'.join([site, node, sensor, method, stream]) + '/catalog.html'
+    data = gc_collect(dataset_id, tag)
+    return data
+
+
+def gc_collect(dataset_id, tag='.*\\.nc$'):
+    """
+    Use a regex tag combined with the dataset ID to collect data from the OOI
+    Gold Copy THREDDS catalog. The collected data is gathered into an xarray
+    dataset for further processing.
+
+    :param dataset_id: dataset ID as a string
+    :param tag: regex tag to use in discriminating the data files, so we only
+        collect the data files of interest
+    :return gc: the collected Gold Copy data as an xarray dataset
+    """
+    # construct the THREDDS catalog URL based on the dataset ID
+    gc_url = 'http://thredds.dataexplorer.oceanobservatories.org/thredds/catalog/ooigoldcopy/public/'
+    url = gc_url + dataset_id
+
+    # Create a list of the files from the request above using a simple regex as a tag to discriminate the files
+    files = list_files(url, tag)
+
+    # Process the data files found above and concatenate into a single data set
+    print('Downloading %d data file(s) from the OOI Gold Copy THREDSS catalog' % len(files))
+    frames = []
+    with tqdm(total=len(files), desc='Waiting', file=sys.stdout) as bar:
+        for f in files:
+            frames.append(process_file(f, True))
+            bar.update()
+            bar.refresh()
+
+    if not frames:
+        return None
+
+    # merge the frames into a single data set, preserving global attributes from the first file if more than one.
+    gc = frames[0]
+    if len(frames) > 1:
+        for idx, frame in enumerate(frames):
+            try:
+                # concatenation handles 99% of the cases
+                gc = xr.concat([gc, frame], dim='time')
+            except ValueError:
+                try:
+                    # try merging the data, usually one of the data files is missing a variable from a co-located
+                    # sensor that the system was unable to find
+                    _, index = np.unique(gc['time'], return_index=True)
+                    gc = gc.isel(time=index)
+                    gc = gc.merge(frame, compat='override')
+                except ValueError:
+                    # something is just not right with this data file
+                    message = "Corrupted data in file {} of {}, skipping merge of this file".format(idx + 1, len(frames))
+                    warnings.warn(message)
+
+    gc = gc.sortby(['deployment', 'time'])
+    gc.attrs['time_coverage_start'] = ('%sZ' % gc.time.min().values)
+    gc.attrs['time_coverage_end'] = ('%sZ' % gc.time.max().values)
+    gc.attrs['time_coverage_resolution'] = ('P%.2fS' % (np.mean(gc.time.diff('time').values).astype(float) / 1e9))
+
+    return gc
 
 
 def list_files(url, tag='.*\\.nc$'):
@@ -701,7 +788,7 @@ def list_files(url, tag='.*\\.nc$'):
     return [node.get('href') for node in soup.find_all('a', text=pattern)]
 
 
-def process_file(catalog_file):
+def process_file(catalog_file, gc=False):
     """
     Function to download one of the NetCDF files as an xarray data set, convert to time as the appropriate dimension
     instead of obs, and drop the extraneous timestamp variables (these were originally not intended to be exposed to
@@ -712,7 +799,10 @@ def process_file(catalog_file):
         file to an xarray data set.
     :return: downloaded data in an xarray dataset.
     """
-    dods_url = 'https://opendap.oceanobservatories.org/thredds/dodsC/'
+    if gc:
+        dods_url = 'http://thredds.dataexplorer.oceanobservatories.org/thredds/dodsC/'
+    else:
+        dods_url = 'https://opendap.oceanobservatories.org/thredds/dodsC/'
     url = re.sub('catalog.html\?dataset=', dods_url, catalog_file)
     ds = xr.load_dataset(url + '#fillmismatch')
 
@@ -914,7 +1004,7 @@ def dict_update(source, overrides):
     the same thread.
     """
     for key, value in overrides.items():
-        if isinstance(value, collections.Mapping) and value:
+        if isinstance(value, Mapping) and value:
             returned = dict_update(source.get(key, {}), value)
             source[key] = returned
         else:

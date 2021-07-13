@@ -67,7 +67,7 @@ class GrossRange():
         if suspect_min < self.fail_min:
             suspect_min = self.fail_min
         if suspect_max > self.fail_max:
-            suspect_max = self.suspect_max
+            suspect_max = self.fail_max
 
         # Save the results
         self.suspect_min = np.round(suspect_min, decimals=2)

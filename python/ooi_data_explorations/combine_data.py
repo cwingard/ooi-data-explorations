@@ -12,8 +12,6 @@ import os
 import sys
 import xarray as xr
 
-from ooi_data_explorations.common import dt64_epoch
-
 
 def combine_datasets(tdata, rhdata, ridata, resample_time):
     """
@@ -32,44 +30,46 @@ def combine_datasets(tdata, rhdata, ridata, resample_time):
     :param resample_time: The resampling time period in minutes
     :return ds: The combined and resampled data set
     """
-    # combine the telemetered and recovered host datasets, which have the same variables
+    # combine the telemetered and recovered host datasets, which have the same variables,
+    # dropping any 1-dimensional variables along the way.
     if tdata and rhdata:
         # use concat to join the datasets and then select only unique time points
-        ds = xr.concat([tdata, rhdata], 'time')
+        ds = xr.concat([tdata.squeeze(), rhdata.squeeze()], 'time')
         _, index = np.unique(ds['time'], return_index=True)
         ds = ds.isel(time=index)
     elif tdata and not rhdata:
         # telemetered data, but no recovered host data
-        ds = tdata
+        ds = tdata.squeeze()
     elif rhdata and not tdata:
         # recovered host data, but no telemetered data
-        ds = rhdata
+        ds = rhdata.squeeze()
     else:
         # no telemetered or recovered host data
         ds = None
 
     # combine the recovered instrument data with the telemetered/recovered host data, if both exists
     if ds and ridata:
+        # drop any one-dimensional variables in ridata and make sure we have a unique time record
+        ridata = ridata.squeeze()
+        _, index = np.unique(ridata['time'], return_index=True)
+        ridata = ridata.isel(time=index)
+
         # first, identify any variables in ds that are not available in ridata
         for v in ds.variables:
             if v not in ridata.variables:
                 # add an empty variable of the same type and dimensions to ridata
-                if len(ds[v].dims) == 1:
-                    ridata[v] = ds[v].broadcast_like(ridata['station'])
-                else:
-                    ridata[v] = ds[v].broadcast_like(ridata['time'])
+                ridata[v] = ds[v].broadcast_like(ridata['time'])
 
         # next, identify any variables in ridata that are not available in ds
         for v in ridata.variables:
             if v not in ds.variables:
                 # add an empty variable of the same type and dimensions to ridata
-                if len(ridata[v].dims) == 1:
-                    ds[v] = ridata[v].broadcast_like(ridata['station'])
-                else:
-                    ds[v] = ridata[v].broadcast_like(ridata['time'])
+                ds[v] = ridata[v].broadcast_like(ds['time'])
 
         # finally, concat the datasets and remove any duplicate timestamps
         ds = xr.concat([ds, ridata], 'time')
+        _, index = np.unique(ds['time'], return_index=True)
+        ds = ds.isel(time=index)
     elif ds and not ridata:
         pass
     elif ridata and not ds:
@@ -80,13 +80,12 @@ def combine_datasets(tdata, rhdata, ridata, resample_time):
 
     # resample the dataset onto a common time record
     itime = '{:d}Min'.format(resample_time)
+    btime = int(resample_time / 2)
+    loff = '{:d}Min'.format(btime)
     gtime = '{:d}Min'.format(resample_time * 3)
     ds = ds.sortby('time')
-    avg = ds.resample(time=itime, keep_attrs=True).median()
+    avg = ds.resample(time=itime, base=btime, loffset=loff, skipna=True).median(keep_attrs=True)
     avg = avg.interpolate_na(dim='time', max_gap=gtime)
-
-    # reset the time record to seconds since 1970
-    avg['time'] = dt64_epoch(avg.time)
 
     # add the attributes back into the data set
     avg.attrs = ds.attrs
@@ -98,8 +97,6 @@ def combine_datasets(tdata, rhdata, ridata, resample_time):
     avg.time.attrs['long_name'] = 'Time'
     avg.time.attrs['standard_name'] = 'time'
     avg.time.attrs['axis'] = 'T'
-    avg.time.attrs['units'] = 'seconds since 1970-01-01 00:00:00 0:00'
-    avg.time.attrs['calendar'] = 'gregorian'
 
     return avg
 
