@@ -2,16 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 @author Christopher Wingard
-@brief Load Coastal Endurance glider data from the IOOS GilderDAC for use in
-    creating QARTOD test values for different sensors either on the gliders
-    or for co-located systems which may be seasonally sparse in data coverage,
-    like the CSPP.
+@brief Load OOI glider data from the IOOS Gilder DAC for use in various
+    processing applications.
 """
 import numpy as np
 import pandas as pd
 import requests
 import sys
-import warnings
 import xarray as xr
 
 from concurrent.futures import ThreadPoolExecutor
@@ -19,12 +16,15 @@ from erddapy import ERDDAP
 from functools import partial
 from tqdm import tqdm
 
-# set up an ERDDAP server object for the IOOS GliderDAC
+# set up an ERDDAP server object for the IOOS Glider DAC
 GLIDER_DAC = ERDDAP(server='ngdac')
 
 
-def create_box(lat, lon, extent=2.7):
+def create_box(lat, lon, extent=1.3490):
     """
+    Create a latitude and longitude based (min/max) bounding box to use in
+    searching for OOI glider datasets available from the IOOS Glider DAC
+    ERDDAP server.
 
     :param lat:
     :param lon:
@@ -41,11 +41,15 @@ def create_box(lat, lon, extent=2.7):
     return bounding_box
 
 
-def list_gliders(bounding_box):
+def list_gliders(institution, bounding_box):
     """
+
+    :param institution:
+    :param bounding_box:
+    :return:
     """
     advanced_search = {
-        'institution': 'ooi_coastal_endurance',
+        'institution': institution,
         'min_lat': bounding_box[0],
         'max_lat': bounding_box[1],
         'min_lon': bounding_box[2],
@@ -58,22 +62,23 @@ def list_gliders(bounding_box):
     return gliders
 
 
-def download_glider(dataset_id, bounding_box):
+def download_glider(dataset_id, bounding_box=None):
     """
-    Download the glider data from the GliderDAC, optionally using a latitude
-    and longitude box to further constrain the request.
+    Download the glider data from the Glider DAC, optionally using a latitude
+    and longitude bounding box to further constrain the request.
 
     :param bounding_box:
     :param dataset_id:
     :return:
     """
     # set up the components of the ERDDAP request
-    GLIDER_DAC.constraints = {
-        'latitude>=': bounding_box[0],
-        'latitude<=': bounding_box[1],
-        'longitude>=': bounding_box[2],
-        'longitude<=': bounding_box[3],
-    }
+    if bounding_box:
+        GLIDER_DAC.constraints = {
+            'latitude>=': bounding_box[0],
+            'latitude<=': bounding_box[1],
+            'longitude>=': bounding_box[2],
+            'longitude<=': bounding_box[3],
+        }
     GLIDER_DAC.protocol = 'tabledap'
     GLIDER_DAC.variables = ['precise_time', 'precise_lon', 'precise_lat', 'depth', 'pressure', 'temperature',
                             'conductivity', 'salinity', 'density', 'backscatter', 'CDOM', 'chlorophyll',
@@ -113,16 +118,26 @@ def download_glider(dataset_id, bounding_box):
     return ds
 
 
-def collect_glider(latitude, longitude):
+def collect_glider(array, latitude, longitude, extent=1.3490):
     """
 
+    :param array:
     :param latitude:
     :param longitude:
+    :param extent:
     :return:
     """
-    # based on the bounding box, create a list of glider datasets to download
-    bounding_box = create_box(latitude, longitude)
-    gliders = list_gliders(bounding_box)
+    # based on the bounding box, and array name, create a list of glider datasets to download
+    if array not in ['endurance', 'cgsn']:
+        raise ValueError('yeah no')
+
+    if array == 'endurance':
+        institution = 'ooi_coastal_endurance'
+    else:
+        institution = 'ooi_coastal_global_scale_nodes_cgsn_'
+
+    bounding_box = create_box(latitude, longitude, extent)
+    gliders = list_gliders(institution, bounding_box)
 
     # download the data for each of the datasets
     partial_glider = partial(download_glider, bounding_box=bounding_box)
