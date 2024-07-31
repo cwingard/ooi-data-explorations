@@ -7,6 +7,8 @@ import os
 from ooi_data_explorations.common import inputs, m2m_collect, m2m_request, load_gc_thredds, \
     get_vocabulary, update_dataset, ENCODINGS
 from ooi_data_explorations.qartod.qc_processing import parse_qc
+from ooi_data_explorations.calibrations import load_cal_coefficients
+from ooi_data_explorations.uncabled.utilities.utilities_nutnr import Calibrations
 
 # load configuration settings
 ATTRS = {
@@ -413,7 +415,7 @@ def suna_datalogger(ds, burst=False):
     else:
         ds['frame_type'] = ('time', [''.join(x.astype(str)) for x in ds.frame_type.data])
     ds = ds.where(ds.frame_type == 'SLF', drop=True)  # remove the dark frames
-    ds = ds.drop(['checksum', 'frame_type', 'humidity'])
+    ds = ds.drop_vars(['checksum', 'frame_type', 'humidity'])
 
     # convert the instrument date and time values to a floating point number with the time in seconds, and then
     # update the internal_timestamp with the values as it was not set correctly during parsing and defaults to 1900.
@@ -431,7 +433,7 @@ def suna_datalogger(ds, burst=False):
                     'calculations of the instrument clock offset and drift. Useful when working with the '
                     'recovered instrument data where no external GPS referenced clock is available.')
     })
-    ds = ds.drop(['date_of_sample', 'time_of_sample'])
+    ds = ds.drop_vars(['date_of_sample', 'time_of_sample'])
 
     # check for data from a co-located CTD, if not present add with appropriate attributes
     if 'sea_water_temperature' not in ds.variables:
@@ -504,6 +506,11 @@ def suna_datalogger(ds, burst=False):
             # 'units': '', # deliberately left blank, unit-less value
             'comment': 'Instrument serial number',
         })
+
+    # load the calibration coefficients
+    uid = ds.attrs['AssetUniqueID']
+    start_time = ds['time'][0].values.astype(float) / 10 ** 9
+    cal = load_cal_coefficients(cal_file, Calibrations, uid, start_time)
 
     # parse the OOI QC variables and add QARTOD style QC summary flags to the data, converting the
     # bitmap represented flags into an integer value representing pass == 1, suspect or of high

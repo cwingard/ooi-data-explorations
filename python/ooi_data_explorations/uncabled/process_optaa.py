@@ -13,8 +13,9 @@ from tqdm import tqdm
 
 from ooi_data_explorations.common import inputs, get_vocabulary, m2m_request, list_files, m2m_collect, \
     load_gc_thredds, update_dataset, N_CORES, ENCODINGS, FILL_INT
+from ooi_data_explorations.calibrations import load_cal_coefficients
 from ooi_data_explorations.profilers import create_profile_id, bin_profiles
-from ooi_data_explorations.uncabled.utilities.utilities_optaa import load_cal_coefficients, apply_dev, apply_tscorr, \
+from ooi_data_explorations.uncabled.utilities.utilities_optaa import apply_dev, apply_tscorr, \
     apply_scatcorr, estimate_chl_poc, calculate_ratios, PureWater, tscor
 from pyseas.data.opt_functions import opt_internal_temp, opt_external_temp
 
