@@ -1270,8 +1270,7 @@ def update_dataset(ds, depth):
             else:
                 ds[ancillary].attrs['ancillary_variables'] = v
 
-    # convert the time values from a datetime64[ns] object to a floating point number with the time in seconds
-    # ds['time'] = dt64_epoch(ds.time)
+    # reset the time variable attributes to be more CF compliant
     ds['time'].attrs = dict({
         'long_name': 'Time',
         'standard_name': 'time',
