@@ -19,6 +19,7 @@ from ooi_data_explorations.uncabled.process_spkir import spkir_datalogger, spkir
 from ooi_data_explorations.qartod.qc_processing import process_gross_range, process_climatology, \
     woa_standard_bins, inputs, ANNO_HEADER, CLM_HEADER, GR_HEADER
 
+# TODO: Add a method to pull in the profile data and run the qartod tests on it
 
 def combine_delivery_methods(site, node, sensor):
     """

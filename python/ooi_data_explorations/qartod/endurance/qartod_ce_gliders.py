@@ -22,6 +22,7 @@ from tqdm import tqdm
 # set up an ERDDAP server object for the IOOS GliderDAC
 GLIDER_DAC = ERDDAP(server='ngdac')
 
+# TODO: Add methods for the ADCPA, CTDGV, DOSTA, FLORT, and PARAD data sets
 
 def create_box(lat, lon, extent=2.7):
     """

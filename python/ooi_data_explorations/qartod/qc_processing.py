@@ -207,7 +207,7 @@ def create_annotations(site, node, sensor, blocks):
 
 
 def format_climatology(parameter, clm, sensor_range, depth_bins, site, node, sensor, stream,
-                       fixed_lower, fixed_upper):
+                       fixed_lower, fixed_upper, stdx=3):
     """
     Creates a dictionary object that can later be saved to a CSV formatted
     file for use in the Climatology lookup tables.
@@ -223,8 +223,11 @@ def format_climatology(parameter, clm, sensor_range, depth_bins, site, node, sen
     :param sensor: Sensor designator, extracted from the third and fourth part of
         the reference designator
     :param stream: Stream name that contains the data of interest
-    :param fixed_lower:
-    :param fixed_upper:
+    :param fixed_lower: fixed, pre-defined value to use for the lower range
+        limit of the climatology test
+    :param fixed_upper: fixed, pre-defined value to use for the upper range
+        limit of the climatology test
+    :param stdx: number of standard deviations to use in the climatology test
     :return: dictionary with the sensor and user gross range values
         added in the formatting expected by the QC lookup
     """
@@ -259,11 +262,11 @@ def format_climatology(parameter, clm, sensor_range, depth_bins, site, node, sen
         header_str += ',"[{}, {}]"'.format(idx+1, idx+1)
 
         # calculate the climatological ranges
-        cmin = mu - clm.monthly_std.values[idx] * 3
+        cmin = mu - clm.monthly_std.values[idx] * stdx
         if fixed_lower or (cmin < sensor_range[0] or cmin > sensor_range[1]):
             cmin = sensor_range[0]
 
-        cmax = mu + clm.monthly_std.values[idx] * 3
+        cmax = mu + clm.monthly_std.values[idx] * stdx
         if fixed_upper or (cmax > sensor_range[1] or cmax < sensor_range[0]):
             cmax = sensor_range[1]
 
@@ -307,6 +310,12 @@ def process_climatology(ds, parameters, sensor_range, **kwargs):
     stream = kwargs.get('stream')
     fixed_lower = kwargs.get('fixed_lower')
     fixed_upper = kwargs.get('fixed_upper')
+    extended = kwargs.get('extended')
+
+    if extended:
+        stdx = 5
+    else:
+        stdx = 3
 
     # initialize the Climatology class
     clm = Climatology()
@@ -344,7 +353,7 @@ def process_climatology(ds, parameters, sensor_range, **kwargs):
 
                     # create the formatted dictionary for the lookup tables
                     qc_dict, clm_table = format_climatology(param, clm, sensor_range[idx], bins, site, node, sensor,
-                                                            stream, fixed_lower, fixed_upper)
+                                                            stream, fixed_lower, fixed_upper, stdx)
 
                     # append the dictionary to the dataframe and build the depth table
                     df = (pd.Series(qc_dict).to_frame()).transpose()
@@ -449,6 +458,14 @@ def process_gross_range(ds, parameters, sensor_range, **kwargs):
     stream = kwargs.get('stream')
     fixed_lower = kwargs.get('fixed_lower')
     fixed_upper = kwargs.get('fixed_upper')
+    extended = kwargs.get('extended')
+
+    if extended:
+        stdx = 5
+        percents = [0.0115, 99.9885]
+    else:
+        stdx = 3
+        percents = [0.15, 99.85]
 
     # create an empty pandas dataframe to hold the results
     gross_range = []
@@ -480,17 +497,23 @@ def process_gross_range(ds, parameters, sensor_range, **kwargs):
                 # Even with a log-normal transformation, the data is not normally distributed, so we will
                 # set the user range using percentiles that approximate the Empirical Rule, covering
                 # 99.7% of the data
-                lower = np.nanpercentile(da, 0.15)
-                upper = np.nanpercentile(da, 99.85)
-                notes = ('User range based on percentiles of the observations, which are not normally distributed. '
-                         'Percentiles were chosen to cover 99.7% of the data, approximating the Empirical Rule.')
+                lower = np.nanpercentile(da, percents[0])
+                upper = np.nanpercentile(da, percents[1])
+                if extended:
+                    notes = ('User range based on percentiles of the observations, which are not normally '
+                             'distributed. Percentiles were chosen to cover 99.977% of the data, approximating '
+                             'a 5-sigma range.')
+                else:
+                    notes = ('User range based on percentiles of the observations, which are not normally '
+                             'distributed. Percentiles were chosen to cover 99.7% of the data, approximating the '
+                             'Empirical Rule.')
             else:
                 # most likely this data is normally distributed, or close enough, and we can use the Empirical Rule
                 mu = da.mean().values
                 sd = da.std().values
-                lower = mu - sd * 3
-                upper = mu + sd * 3
-                notes = 'User range based on the mean +- 3 standard deviations of all observations.'
+                lower = mu - sd * stdx
+                upper = mu + sd * stdx
+                notes = 'User range based on the mean +- {} standard deviations of all observations.'.format(stdx)
 
             # reset the lower and upper ranges if they exceed the sensor ranges
             if fixed_lower or lower < sensor_range[idx][0]:

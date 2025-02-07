@@ -19,6 +19,7 @@ from ooi_data_explorations.uncabled.process_velpt import velpt_datalogger, velpt
 from ooi_data_explorations.qartod.qc_processing import process_gross_range, process_climatology, \
     woa_standard_bins, inputs, ANNO_HEADER, CLM_HEADER, GR_HEADER
 
+# TODO: Add the ability to process the CSPP VELPT data for the climatology tests
 
 def combine_delivery_methods(site, node, sensor):
     """

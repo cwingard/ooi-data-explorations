@@ -2,12 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 @author Christopher Wingard
-@brief Load the PCO2A data from the uncabled, Coastal Endurance Surface
+@brief Load the WAVSS data from the uncabled, Coastal Endurance Surface
     Moorings and processes the data to generate QARTOD Gross Range and
     Climatology test limits
 """
 import dateutil.parser as parser
 import os
+
+import numpy as np
 import pandas as pd
 import pytz
 import xarray as xr
@@ -22,7 +24,8 @@ from ooi_data_explorations.qartod.qc_processing import process_gross_range, proc
 def combine_delivery_methods(site, node, sensor):
     """
     Takes the downloaded data from each of the two data delivery methods for
-    the bulk wave statistics from the Tri-Axys wave sensor, and combines each
+    the bulk wave statistics from the Tri-Axys wave sensor (or just the
+    recovered instrument data for the tRDI WavesMon data), and combines each
     of them into a single, merged xarray data set.
 
     :param site: Site designator, extracted from the first part of the
@@ -33,35 +36,41 @@ def combine_delivery_methods(site, node, sensor):
         of the reference designator
     :return merged: the combined, merged telemetered and recovered_host data
     """
-    # set the regex tag and stream names
-    tag = '.*WAVSS.*\\.nc$'
-    tstream = 'wavss_a_dcl_statistics'
-    rstream = 'wavss_a_dcl_statistics_recovered'
+    if node == 'SBD12':
+        # this is a Tri-Axys wave sensor, so set the tag and stream names
+        tag = '.*WAVSS.*\\.nc$'
+        tstream = 'wavss_a_dcl_statistics'
+        rstream = 'wavss_a_dcl_statistics_recovered'
 
-    # download the telemetered data and re-process it to create a more useful and coherent data set
-    telem = load_gc_thredds(site, node, sensor, 'telemetered', tstream, tag)
-    deployments = []
-    print('# -- Group the data by deployment and process the data')
-    grps = list(telem.groupby('deployment'))
-    for grp in grps:
-        print('# -- Processing telemetered deployment %s' % grp[0])
-        deployments.append(wavss_datalogger(grp[1]))
-    deployments = [i for i in deployments if i]
-    telem = xr.concat(deployments, 'time')
+        # download the telemetered data and re-process it to create a more useful and coherent data set
+        telem = load_gc_thredds(site, node, sensor, 'telemetered', tstream, tag)
+        deployments = []
+        print('# -- Group the data by deployment and process the data')
+        grps = list(telem.groupby('deployment'))
+        for grp in grps:
+            print('# -- Processing telemetered deployment %s' % grp[0])
+            deployments.append(wavss_datalogger(grp[1]))
+        deployments = [i for i in deployments if i]
+        telem = xr.concat(deployments, 'time')
 
-    # download the recovered host data and re-process it to create a more useful and coherent data set
-    rhost = load_gc_thredds(site, node, sensor, 'recovered_host', rstream, tag)
-    deployments = []
-    print('# -- Group the data by deployment and process the data')
-    grps = list(rhost.groupby('deployment'))
-    for grp in grps:
-        print('# -- Processing recovered_host deployment %s' % grp[0])
-        deployments.append(wavss_datalogger(grp[1]))
-    deployments = [i for i in deployments if i]
-    rhost = xr.concat(deployments, 'time')
+        # download the recovered host data and re-process it to create a more useful and coherent data set
+        rhost = load_gc_thredds(site, node, sensor, 'recovered_host', rstream, tag)
+        deployments = []
+        print('# -- Group the data by deployment and process the data')
+        grps = list(rhost.groupby('deployment'))
+        for grp in grps:
+            print('# -- Processing recovered_host deployment %s' % grp[0])
+            deployments.append(wavss_datalogger(grp[1]))
+        deployments = [i for i in deployments if i]
+        rhost = xr.concat(deployments, 'time')
 
-    # combine the two datasets into a single, merged time series (no resampling)
-    merged = combine_datasets(telem, rhost, None, None)
+        # combine the two datasets into a single, merged time series (no resampling)
+        merged = combine_datasets(telem, rhost, None, None)
+    elif node == 'MFD35':
+        # this is the tRDI ADCP, so set the tag and stream names and download the recovered instrument data
+        merged = load_gc_thredds(site, node, sensor, 'recovered_inst', 'adcpt_m_instrument_log9_recovered', '.*\\.nc$')
+    else:
+        return ValueError('Node not recognized.')
 
     return merged
 
@@ -126,16 +135,35 @@ def generate_qartod(site, node, sensor, cut_off):
     wavss = wavss.sel(time=slice('2014-01-01T00:00:00', end_date))
 
     # set up the parameters and fail limits for the gross range and climatology tests
-    parameters = ['significant_wave_height', 'average_wave_height', 'max_wave_height', 'wave_height_10',
-                  'wave_height_hmo', 'mean_spectral_period', 'mean_wave_period', 'peak_wave_period',
-                  'significant_period', 'wave_period_10', 'wave_period_tp5', 'mean_direction', 'mean_spread']
-    limits = [[0, 40], [0, 40], [0, 40], [0, 40], [0, 40], [1.5, 33], [1.5, 33],
-              [1.5, 33], [1.5, 33], [1.5, 33], [1.5, 33], [0, 360], [0, 90]]
-    gr_lookup = process_gross_range(wavss, parameters, limits, site=site, node=node, sensor=sensor)
+    if node == 'SBD12':
+        parameters = ['significant_wave_height', 'average_wave_height', 'max_wave_height', 'wave_height_10',
+                      'wave_height_hmo', 'mean_spectral_period', 'mean_wave_period', 'peak_wave_period',
+                      'significant_period', 'wave_period_10', 'wave_period_tp5', 'mean_direction', 'mean_spread']
+        limits = [[0, 40], [0, 40], [0, 40], [0, 40], [0, 40], [1.5, 33], [1.5, 33],
+                  [1.5, 33], [1.5, 33], [1.5, 33], [1.5, 33], [0, 360], [0, 90]]
+
+        # convert the directional values to radians prior to processing
+        wavss['mean_direction'] = np.deg2rad(wavss['mean_direction'])
+    else:
+        parameters = ['significant_wave_height', 'peak_wave_period', 'peak_wave_direction', 'h_mean', 't_mean',
+                      'd_mean', 'h_max', 't_max', 'h_1_3', 't_1_3', 'h_1_10', 't_1_10', 'hs_sea', 'tp_sea',
+                      'dp_sea', 'hs_swell', 'tp_swell', 'dp_swell']
+        limits = [[0, 40], [1.5, 33], [0, 360], [0, 40], [1.5, 33], [0, 360], [0, 40], [1.5, 33], [0, 40],
+                  [1.5, 33], [0, 40], [1.5, 33], [0, 40], [1.5, 33], [0, 360], [0, 40], [1.5, 33], [0, 360]]
+
+        # convert the directional values to radians prior to processing
+        wavss['peak_wave_direction'] = np.deg2rad(wavss['peak_wave_direction'])
+        wavss['d_mean'] = np.deg2rad(wavss['d_mean'])
+        wavss['dp_sea'] = np.deg2rad(wavss['dp_sea'])
+        wavss['dp_swell'] = np.deg2rad(wavss['dp_swell'])
+
+    # create and format the gross range lookups for the wavss streams
+    gr_lookup = process_gross_range(wavss, parameters, limits, site=site, node=node, sensor=sensor, extended=True)
     gr_lookup['source'] = ('User range based on data collected through {}.'.format(src_date))
 
-    # create and format the climatology lookups and tables for the wavss and water streams
-    clm_lookup, clm_table = process_climatology(wavss, parameters, limits, site=site, node=node, sensor=sensor)
+    # create and format the climatology lookups and tables for the wavss streams
+    clm_lookup, clm_table = process_climatology(wavss, parameters, limits, site=site, node=node, sensor=sensor,
+                                                extended=True)
     clm_lookup['source'] = ('Monthly ranges based on data collected through {}.'.format(src_date))
 
     return annotations, gr_lookup, clm_lookup, clm_table
@@ -174,9 +202,14 @@ def main(argv=None):
     # save the climatology values and table to a csv for further processing
     clm_csv = '-'.join([site, node, sensor]) + '.climatology.csv'
     clm_lookup.to_csv(os.path.join(out_path, clm_csv), index=False, columns=CLM_HEADER)
-    parameters = ['significant_wave_height', 'average_wave_height', 'max_wave_height', 'wave_height_10',
-                  'wave_height_hmo', 'mean_spectral_period', 'mean_wave_period', 'peak_wave_period',
-                  'significant_period', 'wave_period_10', 'wave_period_tp5', 'mean_direction', 'mean_spread']
+    if node == 'SBD12':
+        parameters = ['significant_wave_height', 'average_wave_height', 'max_wave_height', 'wave_height_10',
+                      'wave_height_hmo', 'mean_spectral_period', 'mean_wave_period', 'peak_wave_period',
+                      'significant_period', 'wave_period_10', 'wave_period_tp5', 'mean_direction', 'mean_spread']
+    else:
+        parameters = ['significant_wave_height', 'peak_wave_period', 'peak_wave_direction', 'h_mean', 't_mean',
+                      'd_mean', 'h_max', 't_max', 'h_1_3', 't_1_3', 'h_1_10', 't_1_10', 'hs_sea', 'ts_sea',
+                      'dp_sea', 'hs_swell', 'ts_swell', 'dp_swell']
     for i in range(len(parameters)):
         tbl = '-'.join([site, node, sensor, parameters[i]]) + '.csv'
         with open(os.path.join(out_path, tbl), 'w') as clm:

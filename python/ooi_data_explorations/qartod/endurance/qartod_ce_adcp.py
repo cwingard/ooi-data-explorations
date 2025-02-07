@@ -6,8 +6,8 @@
     Moorings and processes the data to generate QARTOD Gross Range and
     Climatology test limits
 """
-TODO: ("develop user range by averaging the full profile, then use a full profiile for a depth-based climatology "
-       "can use the same depth based values for the CSPP VELPT climatology measurements")
+# TODO: develop user range by averaging the full profile, then use a full profiile for a depth-based climatology
+#       can use the same depth based values for the CSPP VELPT climatology measurements
 
 import dateutil.parser as parser
 import os

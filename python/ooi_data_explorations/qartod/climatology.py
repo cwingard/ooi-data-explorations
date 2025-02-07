@@ -153,20 +153,20 @@ class Climatology():
             "variance_explained": 1 - resid / sum((ts - ts.mean()) ** 2)
         }
 
-        if self.regression['variance_explained'] > 0.15:
-            # Calculate the two-cycle fitted data
-            fitted_data = beta[0] + beta[1]*np.sin(2*np.pi*f*t_out) + beta[2]*np.cos(
-                2*np.pi*f*t_out) + beta[3]*np.sin(4*np.pi*f*t_out) + beta[4]*np.cos(4*np.pi*f*t_out)
+        # calculate the monthly averages first from the monthly means
+        self.mu(da)
+        self.monthly_fit = self.monthly_mu
+        if self.regression['residuals'].size > 0:
+            if self.regression['variance_explained'] > 0.15:
+                # Calculate the two-cycle fitted data
+                fitted_data = beta[0] + beta[1]*np.sin(2*np.pi*f*t_out) + beta[2]*np.cos(
+                    2*np.pi*f*t_out) + beta[3]*np.sin(4*np.pi*f*t_out) + beta[4]*np.cos(4*np.pi*f*t_out)
 
-            fitted_data = pd.Series(fitted_data, index=mu.get_index("time"))
-            self.fitted_data = fitted_data
+                fitted_data = pd.Series(fitted_data, index=mu.get_index("time"))
+                self.fitted_data = fitted_data
 
-            # Return the monthly_avg from the fitted data
-            self.monthly_fit = self.fitted_data.groupby(self.fitted_data.index.month).mean()
-        else:
-            # Return the monthly_avg from the monthly means
-            self.mu(da)
-            self.monthly_fit = self.monthly_mu
+                # re-calculate the monthly averages using the fitted data
+                self.monthly_fit = self.fitted_data.groupby(self.fitted_data.index.month).mean()
 
         # Return the monthly_std
         self.std(da)
