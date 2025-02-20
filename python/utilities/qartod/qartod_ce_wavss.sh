@@ -2,7 +2,7 @@
 #
 # qartod_ce_wavss.sh
 #
-# Collect the WAVSS data from the four OOI Coastal Endurance moorings to
+# Collect the WAVSS data from the OOI Coastal Endurance moorings to
 # calculate QARTOD test ranges and generate the different lookup values and
 # tables.
 #
@@ -13,14 +13,20 @@
 conda activate ooi
 PYTHON="python -m ooi_data_explorations.qartod.endurance.qartod_ce_wavss"
 
+### CE01ISSM ###
+$PYTHON -s CE01ISSM -n MFD35 -sn 04-WAVSSM000 -co 2025-01-01T00:00:00
+
 ### CE02SHSM ###
-$PYTHON -s CE02SHSM -n SBD12 -sn 05-WAVSSA000 -co 2023-01-01T00:00:00
+$PYTHON -s CE02SHSM -n SBD12 -sn 05-WAVSSA000 -co 2025-01-01T00:00:00
 
 ### CE04OSSM ###
-$PYTHON -s CE04OSSM -n SBD12 -sn 05-WAVSSA000 -co 2023-01-01T00:00:00
+$PYTHON -s CE04OSSM -n SBD12 -sn 05-WAVSSA000 -co 2025-01-01T00:00:00
+
+### CE06ISSM ###
+$PYTHON -s CE06ISSM -n MFD35 -sn 04-WAVSSM000 -co 2025-01-01T00:00:00
 
 ### CE07SHSM ###
-$PYTHON -s CE07SHSM -n SBD12 -sn 05-WAVSSA000 -co 2023-01-01T00:00:00
+$PYTHON -s CE07SHSM -n SBD12 -sn 05-WAVSSA000 -co 2025-01-01T00:00:00
 
 ### CE09OSSM ###
-$PYTHON -s CE09OSSM -n SBD12 -sn 05-WAVSSA000 -co 2023-01-01T00:00:00
+$PYTHON -s CE09OSSM -n SBD12 -sn 05-WAVSSA000 -co 2025-01-01T00:00:00

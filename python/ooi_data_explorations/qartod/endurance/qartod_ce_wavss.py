@@ -101,7 +101,7 @@ def generate_qartod(site, node, sensor, cut_off):
     # load the combined telemetered and recovered_host data
     wavss = combine_delivery_methods(site, node, sensor)
 
-    # the CF card on CE02SHSM was corrupted during deployment 4, all of that deployments data is bad
+    # the CF card on CE02SHSM was corrupted during deployment 4, all of that deployment's data is bad
     if site == 'CE02SHSM':
         wavss = wavss.where(wavss.deployment != 4, drop=True)
 
@@ -171,7 +171,7 @@ def generate_qartod(site, node, sensor, cut_off):
 
 def main(argv=None):
     """
-    Download the PCO2A data from the Gold Copy THREDDS server and create the
+    Download the WAVSS data from the Gold Copy THREDDS server and create the
     QARTOD gross range and climatology test lookup tables.
     """
     # set up the input arguments
