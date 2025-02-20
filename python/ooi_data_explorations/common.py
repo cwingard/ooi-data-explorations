@@ -110,12 +110,19 @@ class InputError(Error):
     def __init__(self, message):
         self.message = message
 
+
 def convert_time(ms):
-    """Calculate UTC timestamp from OOI milliseconds"""
+    """
+    Calculate UTC timestamp from OOI milliseconds
+
+    :param ms: time in milliseconds since 1900-01-01T00:00:00.000Z
+    :return: datetime object
+    """
     if ms is None:
         return None
     else:
-        return datetime.utcfromtimestamp(ms/1000)
+        return datetime.fromtimestamp(ms / 1000)
+
 
 # Sensor Information
 def list_sites():
@@ -509,13 +516,6 @@ def add_annotation_qc_flags(ds, annotations):
     :return ds: The input xarray dataset with the annotation qc flags added as a
         named variable to the dataset.
     """
-    # First, add a local function to convert times
-    def convert_time(ms):
-        if ms is None:
-            return None
-        else:
-            return datetime.utcfromtimestamp(ms/1000)
-
     # First, check the type of the annotations to determine if needed to put into a dataframe
     if type(annotations) is list or type(annotations) is dict:
         annotations = pd.DataFrame(annotations)
@@ -644,21 +644,21 @@ def get_vocabulary(site, node, sensor):
 
 
 # Requesting and compiling data via synchronous and asynchronous requests
-def m2m_sync(site, node, sensor, method, stream, start=None, stop=None, parameters=None):
-    """
-    TODO
-
-    :param site:
-    :param node:
-    :param sensor:
-    :param method:
-    :param stream:
-    :param start:
-    :param stop:
-    :param parameters:
-    :return:
-    """
-    pass
+#def m2m_sync(site, node, sensor, method, stream, start=None, stop=None, parameters=None):
+#    """
+#    TODO
+#
+#    :param site:
+#    :param node:
+#    :param sensor:
+#    :param method:
+#    :param stream:
+#    :param start:
+#    :param stop:
+#    :param parameters:
+#    :return:
+#    """
+#    pass
 
 
 def m2m_request(site, node, sensor, method, stream, start=None, stop=None):
@@ -1009,7 +1009,7 @@ def process_file(catalog_file, gc=None, use_dask=False):
                     del (ds[v].attrs['_FillValue'])  # no fill values for time!
                     del (ds[v].attrs['units'])       # time units are set via the encoding
                     ds[v].encoding = {'_FillValue': None, 'units': 'seconds since 1900-01-01T00:00:00.000Z'}
-                    np_time = ntp_date + (ds[v] * 1e9).astype('timedelta64[ns]')
+                    np_time = ntp_date + (ds[v] * 1e9).astype('timedelta64[ns]')  # type: ignore
                     ds[v] = np_time
 
     # sort by time
@@ -1203,7 +1203,7 @@ def update_dataset(ds, depth):
         }
     })
     for v in geo_coords.variables:
-        geo_coords[v].attrs = geo_attrs[v]
+        geo_coords[v].attrs = geo_attrs[v]  # type: ignore
 
     # merge the geospatial coordinates into the data set
     ds = ds.merge(geo_coords)

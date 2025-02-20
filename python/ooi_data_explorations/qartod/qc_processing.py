@@ -482,10 +482,13 @@ def process_gross_range(ds, parameters, sensor_range, **kwargs):
 
             # Select out the dataarray of the desired param. This speeds up the process
             m = (ds[param] > sensor_range[idx][0]) & (ds[param] < sensor_range[idx][1]) & (~np.isnan(ds[param]))
-            da = ds[param][m]
+            da = ds[param].where(m, drop=True).values.flatten()
             vals = []
             for i in range(5000):
                 vals.append(random_choice(da, 4500))
+
+            # reset the dataarray
+            da = ds[param].where(m, drop=True)
 
             # Now compute the pnorm values via dask.delayed
             with ProgressBar():

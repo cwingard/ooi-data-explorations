@@ -6,25 +6,22 @@
     Moorings and processes the data to generate QARTOD Gross Range and
     Climatology test limits
 """
-# TODO: develop user range by averaging the full profile, then use a full profiile for a depth-based climatology
-#       can use the same depth based values for the CSPP VELPT climatology measurements
-
 import dateutil.parser as parser
+import numpy as np
 import os
 import pandas as pd
 import pytz
 
-from ooi_data_explorations.common import get_annotations, load_gc_thredds, add_annotation_qc_flags
+from ooi_data_explorations.common import get_annotations, get_vocabulary, load_gc_thredds, add_annotation_qc_flags
 from ooi_data_explorations.combine_data import combine_datasets
-from ooi_data_explorations.uncabled.process_adcp import adcp_instrument
 from ooi_data_explorations.qartod.qc_processing import process_gross_range, process_climatology, inputs, \
-    ANNO_HEADER, CLM_HEADER, GR_HEADER
+    woa_standard_bins, ANNO_HEADER, CLM_HEADER, GR_HEADER
 
 
 def combine_delivery_methods(site, node, sensor):
     """
     Takes the downloaded data from each of the three data delivery methods for
-    the uncabled CTD (CTDBP), and combines each of them into a single, merged
+    the uncabled CTD (ADCP), and combines each of them into a single, merged
     xarray data set.
 
     :param site: Site designator, extracted from the first part of the
@@ -33,32 +30,28 @@ def combine_delivery_methods(site, node, sensor):
         reference designator
     :param sensor: Sensor designator, extracted from the third and fourth part
         of the reference designator
-    :return merged: the merged CTDBP data stream resampled to a 3-hour time
+    :return merged: the merged ADCP data stream resampled to a 3-hour time
         record
     """
     # download the telemetered data and re-process it to create a more useful and coherent data set
     tag = '.*ADCP.*\\.nc$'
     stream = 'adcp_velocity_earth'
     telem = load_gc_thredds(site, node, sensor, 'telemetered', stream, tag)
-    telem = ctdbp_datalogger(telem)
 
     # download the recovered host data and re-process it to create a more useful and coherent data set
-    rhost = load_gc_thredds(site, node, sensor, 'recovered_host', 'ctdbp_cdef_dcl_instrument_recovered', tag)
-    rhost = ctdbp_datalogger(rhost)
+    rhost = load_gc_thredds(site, node, sensor, 'recovered_host', stream, tag)
 
     # download the recovered instrument data and re-process it to create a more useful and coherent data set
-    rinst = load_gc_thredds(site, node, sensor, 'recovered_inst', 'ctdbp_cdef_instrument_recovered', tag)
-    rinst = ctdbp_instrument(rinst)
+    rinst = load_gc_thredds(site, node, sensor, 'recovered_inst', stream, tag)
 
-    # combine the three datasets into a single, merged time series resampled to a 3-hour interval time series
-    merged = combine_datasets(telem, rhost, rinst, 180)
-
+    # combine the three datasets into a single, merged time series
+    merged = combine_datasets(telem, rhost, rinst, None)
     return merged
 
 
 def generate_qartod(site, node, sensor, cut_off):
     """
-    Load the CTD data for a defined reference designator (using the site, node
+    Load the ADCP data for a defined reference designator (using the site, node
     and sensor names to construct the reference designator) collected via the
     telemetered, recovered host and instrument methods and combine them into a
     single data set from which QARTOD test limits for the gross range and
@@ -90,12 +83,15 @@ def generate_qartod(site, node, sensor, cut_off):
         annotations['beginDate'] = pd.to_datetime(annotations.beginDT, unit='ms').dt.strftime('%Y-%m-%dT%H:%M:%S')
         annotations['endDate'] = pd.to_datetime(annotations.endDT, unit='ms').dt.strftime('%Y-%m-%dT%H:%M:%S')
 
-    # create an annotation-based quality flag
-    data = add_annotation_qc_flags(data, annotations)
+        # create an annotation-based quality flag
+        data = add_annotation_qc_flags(data, annotations)
 
-    # clean-up the data, removing values that were marked as fail either from the quality checks or in the
-    # annotations, and all data collected after the cut off date
-    data = data.where(data.rollup_annotations_qc_results != 4)
+    if 'rollup_annotations_qc_results' in data.variables:
+        data = data.where(data.rollup_annotations_qc_results != 4, drop=True)
+
+    # apply some basic sensor specific checks to the data
+    data = data.where(np.abs(data['pitch']) < 1500, drop=True)
+    data = data.where(np.abs(data['roll']) < 1500, drop=True)
 
     # if a cut_off date was used, limit data to all data collected up to the cut_off date.
     # otherwise, set the limit to the range of the downloaded data.
@@ -110,67 +106,43 @@ def generate_qartod(site, node, sensor, cut_off):
         end_date = cut.strftime('%Y-%m-%dT%H:%M:%S')
         src_date = cut.strftime('%Y-%m-%d')
 
+    _, index = np.unique(data['time'], return_index=True)
+    data = data.isel(time=index)
     data = data.sel(time=slice('2014-01-01T00:00:00', end_date))
 
     # set the parameters and the sensor range limits
-    parameters = ['seawater_conductivity', 'seawater_temperature', 'seawater_pressure', 'practical_salinity']
-
-    if site == 'CE09OSSM' and node == 'MFD37':
-        plimit = [0, 600]   # 600 m stain gauge pressure sensor
-    else:
-        plimit = [0, 100]   # 100 m stain gauge pressure sensor
-
-    limits = [[0, 9], [-5, 35], plimit, [0, 42]]
+    parameters = ['pitch','roll','temperature','eastward_seawater_velocity','northward_seawater_velocity']
+    limits = [[-2000, 2000], [-2000, 2000], [-500, 4500], [-5, 5], [-5, 5]]
 
     # create the initial gross range entry
-    gr_lookup = process_gross_range(data, parameters, limits, site=site, node=node, sensor=sensor)
+    gr_lookup = process_gross_range(data, parameters, limits, site=site, node=node, sensor=sensor,
+                                    stream='adcpt_velocity_earth', extended=True)
 
-    # replicate it three times for the different streams
-    gr_lookup = pd.concat([gr_lookup] * 3, ignore_index=True)
+    # add the source date to the notes
+    gr_lookup['notes'] = ('User range based on data collected through {}.'.format(src_date))
 
-    # re-work the gross range entries for the different streams, resetting the variable names back to OOINet names
-    streams = ['ctdbp_cdef_dcl_instrument', 'ctdbp_cdef_dcl_instrument_recovered', 'ctdbp_cdef_instrument_recovered']
-    variables = [
-        ['conductivity', 'temp', 'pressure', 'practical_salinity'],
-        ['conductivity', 'temp', 'pressure', 'practical_salinity'],
-        ['ctdbp_seawater_conductivity', 'ctdbp_seawater_temperature', 'ctdbp_seawater_pressure', 'practical_salinity']
-    ]
-    idx = 0
-    for num, stream in enumerate(streams):
-        for j in range(4):
-            gr_lookup['parameter'][idx + j] = {'inp': variables[num][j]}
-            gr_lookup['stream'][idx + j] = stream
-        idx += 4
-
-    # set the default source string
-    gr_lookup['source'] = ('Sensor min/max based on the vendor sensor specifications. '
-                           'The user min/max is the historical mean of all data collected '
-                           'up to {} +/- 3 standard deviations.'.format(src_date))
-
+    # set up the bins for a depth based climatology
+    vocab = get_vocabulary(site, node, sensor)[0]
+    max_depth = vocab['maxdepth']
+    depth_bins = woa_standard_bins()
+    m = depth_bins[:, 1] <= max_depth
+    depth_bins = depth_bins[m, :]
+    
     # create the initial climatology lookup and tables for the data
-    clm_lookup, clm_table = process_climatology(data, parameters[1:4:2], limits[1:4:2],
-                                                site=site, node=node, sensor=sensor)
-
-    # replicate the climatology lookup table three times for the different streams
-    clm_lookup = pd.concat([clm_lookup] * 3, ignore_index=True)
-
-    # re-work the climatology lookup table for the different streams, resetting the variable names back to OOINet names
-    idx = 0
-    for num, stream in enumerate(streams):
-        for j in [1, 3]:
-            clm_lookup['parameters'][idx] = {'inp': variables[num][j], 'tinp': 'time', 'zinp': 'None'}
-            clm_lookup['stream'][idx] = stream
-            idx += 1
+    # TODO: need to flatten the bin_depths and velocity data to allow for the climatology processing to work
+    data = data.rename({'bin_depths': 'depth'})
+    clm_lookup, clm_table = process_climatology(data, parameters[3:], limits[3:], site=site, node=node,
+                                                depth_bins=depth_bins, sensor=sensor, stream='adcpt_velocity_earth')
 
     return annotations, gr_lookup, clm_lookup, clm_table
 
 
 def main(argv=None):
     """
-    Download the CTDBP data from the Gold Copy THREDDS server and create the
+    Download the ADCP data from the Gold Copy THREDDS server and create the
     QARTOD gross range and climatology test lookup tables.
     """
-    # setup the input arguments
+    # set up the input arguments
     args = inputs(argv)
     site = args.site
     node = args.node
@@ -197,7 +169,7 @@ def main(argv=None):
     # save the climatology values and table to a csv for further processing
     clm_csv = '-'.join([site, node, sensor]) + '.climatology.csv'
     clm_lookup.to_csv(os.path.join(out_path, clm_csv), index=False, columns=CLM_HEADER)
-    parameters = ['sea_water_temperature', 'practical_salinity']
+    parameters = ['eastward_seawater_velocity', 'northward_seawater_velocity']
     for i in range(len(parameters)):
         tbl = '-'.join([site, node, sensor, parameters[i]]) + '.csv'
         with open(os.path.join(out_path, tbl), 'w') as clm:

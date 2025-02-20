@@ -175,19 +175,15 @@ def generate_qartod(site, node, sensor, cut_off):
               [-2.5, 2.5], [-2.5, 2.5], [-2.5, 2.5]]
 
     # create the initial gross range entry
-    gr_lookup = process_gross_range(data, parameters, limits, site=site,
-                                    node=node, sensor=sensor, stream='dosta_o_dcl_accel')
+    gr_lookup = process_gross_range(data, parameters, limits, site=site, node=node, sensor=sensor,
+                                    stream='mopak_o_dcl_accel', extended=True)
 
-    # add the stream name and the source comment
+    # add the source date to the notes
     gr_lookup['notes'] = ('User range based on data collected through {}.'.format(src_date))
 
     # just use the first 3 parameters for the climatology test
-    clm_lookup, clm_table = process_climatology(data, parameters[:3], limits[:3], depth_bins=None,
-                                                site=site, node=node, sensor=sensor,
-                                                stream='dosta_abcdjm_replace_me')
-
-    # add the stream name
-    clm_lookup['stream'] = 'dosta_abcdjm_replace_me'
+    clm_lookup, clm_table = process_climatology(data, parameters[:3], limits[:3], site=site, node=node, sensor=sensor,
+                                                stream='mopak_o_dcl_accel', extended=True)
 
     return annotations, gr_lookup, clm_lookup, clm_table
 
