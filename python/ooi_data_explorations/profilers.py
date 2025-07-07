@@ -221,3 +221,75 @@ def updown(db, db_level):
         dzdt[pks[i]:pks[i + 1]+1] = dz[i]
 
     return pks, dzdt
+
+
+def pair_profiles(ds, break_t = 60):
+    """
+    Function to pair profiles with their partner
+    profile.
+    
+    :param ds: the profile dataset with the profile variable added
+    :param break_t: the time (min) separation below which a profile is paired
+    :return ds: the profile dataset with the paired profile variable added
+    """
+
+    parameters = [p for p in ds.variables]
+    if 'profile' not in parameters:
+        raise NameError('Dataset must have the variable "profile"')
+
+    # First, identify the start times of each individual profile
+    t = []
+    for p in np.unique(ds['profile']):
+        idx, = np.where(ds['profile'] == p)
+        t.append(ds['time'][idx[0]].values)
+
+    # Next, calculate the time differences
+    dt = np.diff(t).astype('timedelta64[m]')
+    
+    # Find where the breaks exceed 1 hour
+    breaks, = np.where(dt > np.timedelta64(60))
+
+    # Now, we need to use the locations of the breaks to group profiles
+    profiles = np.unique(ds['profile'])
+    p1 = profiles[breaks]
+    p2 = profiles[breaks] + 1
+
+    grouping = []
+    for p in profiles:
+        if p==1:
+            if p in p1:
+                g = np.nan
+            else:
+                g = p + 1
+        elif p==profiles[-1]:
+            if p in p2:
+                g = np.nan
+            else:
+                g = p - 1
+        else:
+            if (p in p1) and (p not in p2):
+                g = p - 1
+            elif (p in p2) and (p not in p1):
+                g = p + 1
+            else:
+                g = np.nan
+        grouping.append(g)
+
+    # Now, add in the paired profile variable to the dataset
+    pairs = np.zeros(ds['profile'].shape)
+    for p in profiles:
+        idx, = np.where(ds['profile'] == p)
+        pairs[idx] = grouping[p-1]
+        
+    ds['profile_pair'] = (['time'], pairs)
+    ds['profile_pair'].attrs = {
+        'long_name': 'Paired Profile Number',
+        'units': 'count',
+        'comment': ('The unique identifier for the profile that is paired to the '
+                    '"profile". The standard operation of deployed profilers is '
+                    'to collect a pair of profiles. However, mechanical issues or '
+                    'power limitations may cause the profiler to operate in "singe" '
+                    'profile mode.')
+    }
+
+    return ds

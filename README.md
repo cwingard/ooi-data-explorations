@@ -62,7 +62,10 @@ cd ooi-data-explorations
 # Add the upstream feed for the master repository
 git remote add upstream git@github.com:oceanobservatories/ooi-data-explorations.git
 git fetch upstream
+```
+>***Did you encounter an error when you trying to fetch upstream?*** *GitHub deprecated password-based authentication for Git operations (as of August 2021), encouraging users to adopt more secure methods like PATs and SSH keys. To fix this error, try adding a new SSH key to your github account. Once you have set up a SSH key, try the `git fetch upstream` command again. Additional details can be found [here.](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account)*
 
+```
 # Set the local master to point instead to the upstream master branch
 git branch master --set-upstream-to upstream/master
 

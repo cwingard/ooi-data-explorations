@@ -1,0 +1,3 @@
+qartodTest,output,parameters,profileCalc
+gross_range,"['lookup']","['pressure','temperature','conductivity','salinity','oxygen','chlorophyll','backscatter','cdom','par','pco2','ph','nitrate']","['binned','integrated']"
+climatology,"['lookup','table']","['temperature','salinity','oxygen','chlorophyll','backscatter','cdom','par','pco2','ph','nitrate']","['binned']"

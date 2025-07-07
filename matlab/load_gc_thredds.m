@@ -65,6 +65,10 @@ options = weboptions("Timeout", 300);
 url = join([base_url dataset_id "/catalog.html"], "");
 files = ph.list_files(url, tag);
 nfiles = numel(files);      % determine number of files to download
+if nfiles == 0
+    data = [];  % no data to download
+    return
+end %if
 data = cell(nfiles, 1);     % pre-allocate a cell array for downloaded results
 
 % check to see if the user has the parallel processing toolbox and there are

@@ -1,0 +1,13 @@
+dataParameter,variables,limits
+temperature,"['sea_water_temperature']","[-5,35]"
+conductivity,"['sea_water_electrical_conductivity']","[0,9]"
+salinity,"['sea_water_practical_salinity']","[0,42]"
+pressure,"['sea_water_pressure','int_ctd_pressure']","[0,6000]"
+oxygen,"['corrected_dissolved_oxygen','dissolved_oxygen']","[0,500]"
+chlorophyll,"['fluorometric_chlorophyll_a']","[0,50]"
+backscatter,"['optical_backscatter']","[0,5]"
+cdom,"['total_volume_scattering_coefficient']","[0,375"]
+nitrate,"['nitrate_concentration','salinity_corrected_nitrate']","[0,300]"
+pco2,"['pco2_seawater']","[200,2000]"
+ph,"['ph_seawater','signal_intensity_434','signal_intensity_578']","[6.9,9]"
+par,"['par_counts_output']","[0,5000]"
