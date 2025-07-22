@@ -6,7 +6,7 @@ from ooi_data_explorations.common import m2m_request, m2m_collect, load_gc_thred
     get_vocabulary, update_dataset, CONFIG, ENCODINGS
 from ooi_data_explorations.uncabled.process_adcp import adcp_instrument
 
-# Setup needed parameters for the request, the user would need to vary
+# Set up needed parameters for the request, the user would need to vary
 # these to suit their own needs and sites/instruments of interest. Site,
 # node, sensor, stream and delivery method names can be obtained from the
 # Ocean Observatories Initiative website. The last two parameters (level
@@ -19,19 +19,22 @@ method = 'telemetered'      # OOI Net data delivery method
 level = 'midwater'          # local directory name, level below site
 instrmt = 'adcp'            # local directory name, instrument below level
 
-# download some of the data for deployment 17 from the Gold Copy THREDDS catalog, the rest from the M2M system
+# download the data for deployment 17 from the Gold Copy THREDDS catalog
 tag = 'deployment0017.*ADCP.*\\.nc$'
 earth = load_gc_thredds(site, node, sensor, method, 'adcp_velocity_earth', tag)
 
-# the so-called engineering data are only available from the M2M system because they are not considered
-# "science" data. The false distinction between science and engineering data is a legacy of earlier OOI data
-# management practices that mistakenly assigned meaning and value to the data prior to its use.
+# The so-called "engineering" data are only available from the M2M system
+# because they are not considered "science" data. The false distinction
+# between science and engineering data is a legacy of earlier OOI data
+# management practices that mistakenly assigned meaning and value to the data
+# prior to its use. We don't need to use the engineering data in this example,
+# but code is included here to demonstrate how to access it if needed
 start, stop = get_deployment_dates(site, node, sensor, 17)
 m = m2m_request(site, node, sensor, method, 'adcp_engineering', start, stop)
 engineering = m2m_collect(m, tag)
 
 # clean-up and reorganize the data
-adcp = adcp_instrument(earth, engineering)
+adcp = adcp_instrument(earth)
 vocab = get_vocabulary(site, node, sensor)[0]
 adcp = update_dataset(adcp, vocab['maxdepth'])
 
