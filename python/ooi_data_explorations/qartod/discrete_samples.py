@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 @author Christopher Wingard
-@brief Used to download discrete sample data from the OOI Alfresco WebDAV server
+@brief Used to download discrete sample data from the OOI Raw Data server
 """
 import io
 import numpy as np
@@ -15,12 +15,12 @@ from bs4 import BeautifulSoup
 
 def get_sites(url):
     """
-    Get the list of arrays from the OOI Alfresco WebDAV server. The list is
+    Get the list of arrays from the OOI Raw Data server. The list is
     returned as a list of BeautifulSoup tags that can be further parsed to
     construct URLs to search for the different cruises per array that will
     have discrete sample data.
 
-    :param url: OOI Alfresco WebDAV server URL
+    :param url: OOI Raw Data server URL
     :return sites: list of BeautifulSoup tags containing the array names
     """
     r = requests.get(url)
@@ -35,12 +35,12 @@ def get_sites(url):
 
 def get_cruises(url, sites, site_name, cruise=None):
     """
-    Get the list of cruises for a specific array from the OOI Alfresco WebDAV
+    Get the list of cruises for a specific array from the OOI Raw Data
     server. The list is returned as a list of BeautifulSoup tags that can be
     further parsed to construct URLs to search for the different discrete
     sample data files per cruise.
 
-    :param url: OOI Alfresco WebDAV server URL
+    :param url: OOI Raw Data server URL
     :param sites: list of BeautifulSoup tags containing the array names
     :param site_name: name of the array to search for
     :param cruise: optional, name of the cruise(s) to search for (can be
