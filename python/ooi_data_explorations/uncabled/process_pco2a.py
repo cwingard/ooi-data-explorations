@@ -10,13 +10,12 @@ from ooi_data_explorations.common import inputs, m2m_collect, m2m_request, get_d
 
 def pco2a_datalogger(ds, burst=False):
     """
-    Takes pco2a data recorded by the data loggers used in the CGSN/EA moorings
+    Takes PCO2A data recorded by the data loggers used in the CGSN/EA moorings
     and cleans up the data set to make it more user-friendly. Primary task is
     renaming parameters and dropping some that are of limited use. Additionally,
     re-organize some of the variables to permit better assessments of the data.
 
-    :param ds: initial pco2a data set for the air measurements downloaded from
-        OOI via the M2M system
+    :param ds: initial PCO2A data set downloaded from OOI via the M2M system
     :param burst: resample the data to an hourly, burst averaged time interval
     :return ds: cleaned up data set
     """
@@ -40,7 +39,12 @@ def pco2a_datalogger(ds, burst=False):
         # ... because it is in the telemetered, but not the recovered_host ...
         shared.append('supply_voltage')
 
-    ds = ds.drop(shared)
+    ds = ds.drop_vars(shared)
+
+    # get rid of the older QC tests (OBE with the newer QARTOD tests) and the QARTOD executed test strings
+    for v in ds.variables:
+        if any(qc in v for qc in ['qc_executed', 'qc_results', 'qartod_executed']):
+            ds = ds.drop_vars(v)
 
     # determine if the upstream parameters are present. delete them if needed, otherwise add the required ones to make
     # sure the NetCDF files are consistent
@@ -48,7 +52,7 @@ def pco2a_datalogger(ds, burst=False):
                 'longwave_irradiance', 'shortwave_irradiance', 'relative_humidity', 'barometric_pressure',
                 'precipitation']
     if 'eastward_velocity' in ds.variables:
-        ds = ds.drop(upstream)
+        ds = ds.drop_vars(upstream)
     else:
         # METBK data was missing, add variables below to keep data sets consistent
         ds['sea_surface_temperature'] = ('time', ds['deployment'].data * np.nan)
@@ -90,14 +94,6 @@ def pco2a_datalogger(ds, burst=False):
             'stream': 'metbk_hourly'
         }
 
-    # drop the two QC tests applied to the L0 values (not supposed to happen)
-    if re.match(r'.*_air.*', ds.attrs['stream']):
-        # air stream
-        ds = ds.drop(['measured_air_co2_qc_executed', 'measured_air_co2_qc_results'])
-    else:
-        # water stream
-        ds = ds.drop(['measured_water_co2_qc_executed', 'measured_water_co2_qc_results'])
-
     # convert the internal timestamp values from a datetime64[ns] object to a floating point number, time in seconds
     ds['internal_timestamp'] = ('time', dt64_epoch(ds.internal_timestamp))
     ds['internal_timestamp'].attrs = dict({
@@ -114,8 +110,6 @@ def pco2a_datalogger(ds, burst=False):
         'met_salsurf': 'sea_surface_salinity',
         'met_wind10m': 'normalized_10m_wind',
         'pco2_co2flux': 'sea_air_co2_flux',
-        'pco2_co2flux_qc_executed': 'sea_air_co2_flux_qc_executed',
-        'pco2_co2flux_qc_results': 'sea_air_co2_flux_qc_results'
     }
     ds = ds.rename(rename)
     for key, value in rename.items():   # bulk attribute update...
@@ -123,8 +117,7 @@ def pco2a_datalogger(ds, burst=False):
 
     ds['sea_air_co2_flux'].attrs['ancillary_variables'] = ('partial_pressure_co2_atm partial_pressure_co2_ssw ' +
                                                            'sea_surface_temperature sea_surface_salinity ' +
-                                                           'normalized_10m_wind sea_air_co2_flux_qc_executed ' +
-                                                           'sea_air_co2_flux_qc_results')
+                                                           'normalized_10m_wind')
 
     # reset incorrectly formatted temperature units
     temp_vars = ['sea_surface_temperature', 'avg_irga_temperature', 'humidity_temperature', 'irga_detector_temperature',
@@ -198,15 +191,15 @@ def quality_checks(ds, param, fail_min, fail_max, window="12H", center=True):
     mad = df.rolling(window=window, center=center).apply(median_absolute_difference)
 
     # Create a flag array to store the results
-    quality_flag = ds[param].astype(int)*0 + 1
+    quality_flag = ds[param].astype(int) * 0 + 1
 
     # Identify where values are below the 3 standard deviations
-    mask = ds[param], median[param] - 3 * mad[param]
+    mask = ds[param] < median[param] - 3 * mad[param]
     quality_flag[mask] = 3
 
     # Add to the dataset
     # Add the flags to the dataset
-    ds[param+"_quality_flag"] = flags
+    ds[param + "_quality_flag"] = quality_flag
 
     # Add attributes
     ds[param+"_quality_flag"].attrs = {
