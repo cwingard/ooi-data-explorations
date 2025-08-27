@@ -6,7 +6,6 @@ import os
 
 from ooi_data_explorations.common import inputs, m2m_collect, m2m_request, load_gc_thredds, \
     update_dataset, ENCODINGS
-from ooi_data_explorations.qartod.qc_processing import parse_qc
 
 from ioos_qc import qartod
 
@@ -16,10 +15,11 @@ def quality_checks(ds):
     Assignment of QARTOD style quality flags to the 1-minute resolution METBK
     (bulk meteorological) data on a per-parameter basis. Two tests are
     performed: the IOOS QARTOD flat line test for all bulk parameters, and a
-    fill value (missing) test. Results are represented using a subset of the
-    QARTOD flags to indicate the quality. QARTOD flags used are:
+    fill value (missing) test. Results are added to the existing QARTOD flags,
+    if available. QARTOD flags used are:
 
         1 = Pass
+        2 = Not Evaluated
         3 = Suspect or of High Interest
         4 = Fail
         9 = Missing
@@ -59,11 +59,12 @@ def quality_checks(ds):
             ds[p][m] = np.nan
             ds['sea_surface_salinity'][m] = np.nan
         else:
-            m = np.isnan(ds[p])
+            m = (np.isnan(ds[p])) | (ds[p] < -99999)  # catch NaNs and other fill values
+            ds[p][m] = np.nan  # convert any fill values to NaNs
             flags[m] = 9
 
-        # add the qc_flags to the dataset, rolling up the results into a single value
-        qc_summary = p + '_qc_summary_flag'
+        # add the flags to the dataset, rolling up the results into a single value
+        qc_summary = p + '_qartod_results'
         if qc_summary in ds.variables:
             # add the new test results to the existing QC summary results
             qc = ds[qc_summary]
@@ -73,15 +74,15 @@ def quality_checks(ds):
             # create a new QC summary variable
             ds[qc_summary] = ('time', flags)
 
-        # set up the attributes for the new variable
-        ds[qc_summary].attrs = dict({
-            'long_name': '%s QC Summary Flag' % ds[p].attrs['long_name'],
-            'standard_name': 'aggregate_quality_flag',
-            'comment': ('Summary quality flag combining the results of the instrument-specific quality tests with '
-                        'existing OOI QC tests, if available, to create a single QARTOD style aggregate quality flag'),
-            'flag_values': np.array([1, 2, 3, 4, 9]),
-            'flag_meanings': 'pass not_evaluated suspect_or_of_high_interest fail missing'
-        })
+            # set up the attributes for the new variable
+            ds[qc_summary].attrs = dict({
+                'long_name': '%s QC Summary Flag' % ds[p].attrs['long_name'],
+                'standard_name': 'aggregate_quality_flag',
+                'comment': ('Summary quality flag combining the results of the instrument-specific quality tests with '
+                            'existing OOI QC tests, if available, to create a single QARTOD style aggregate quality flag'),
+                'flag_values': np.array([1, 2, 3, 4, 9]),
+                'flag_meanings': 'pass not_evaluated suspect_or_of_high_interest fail missing'
+            })
 
 
 def metbk_hourly(ds):
@@ -113,15 +114,15 @@ def metbk_hourly(ds):
                   'barometric_pressure', 'precipitation', 'sea_surface_temperature', 'relative_humidity',
                   'shortwave_irradiance'])
 
+    # get rid of the older QC tests (OBE with the newer QARTOD tests) and the QARTOD executed test strings
+    for v in ds.variables:
+        if any(qc in v for qc in ['qc_executed', 'qc_results', 'qartod_executed']):
+            ds = ds.drop_vars(v)
+
     # reset incorrectly formatted temperature units
     temp_vars = ['met_tempa2m', 'met_tempskn']
     for var in temp_vars:
         ds[var].attrs['units'] = 'degree_Celsius'
-
-    # parse the OOI QC variables and add QARTOD style QC summary flags to the data, converting the
-    # bitmap represented flags into an integer value representing pass == 1, suspect or of high
-    # interest == 3, and fail == 4.
-    ds = parse_qc(ds)
 
     return ds
 
@@ -162,19 +163,16 @@ def metbk_datalogger(ds, burst=False):
     ds = ds.drop(['dcl_controller_timestamp', 'internal_timestamp', 'met_barpres', 'met_windavg_mag_corr_east',
                   'met_windavg_mag_corr_north', 'met_netsirr', 'met_spechum', 'ct_depth', 'met_current_direction',
                   'met_current_speed', 'met_relwind_direction', 'met_relwind_speed', 'met_heatflx_minute',
-                  'met_latnflx_minute', 'met_netlirr_minute', 'met_sensflx_minute', 'met_barpres_qc_executed',
-                  'met_barpres_qc_results', 'met_current_direction_qc_executed', 'met_current_direction_qc_results',
-                  'met_current_speed_qc_executed', 'met_current_speed_qc_results', 'met_relwind_direction_qc_executed',
-                  'met_relwind_direction_qc_results', 'met_relwind_speed_qc_executed', 'met_relwind_speed_qc_results',
-                  'met_netsirr_qc_executed', 'met_netsirr_qc_results', 'met_spechum_qc_executed',
-                  'met_spechum_qc_results'])
+                  'met_latnflx_minute', 'met_netlirr_minute', 'met_sensflx_minute'])
 
-    # rename the met_salsurf parameters
+    # get rid of the older QC tests (OBE with the newer QARTOD tests) and the QARTOD executed test strings
+    for v in ds.variables:
+        if any(qc in v for qc in ['qc_executed', 'qc_results', 'qartod_executed']):
+            ds = ds.drop_vars(v)
+
+    # rename the met_salsurf parameter
     rename = {
         'met_salsurf': 'sea_surface_salinity',
-        'met_salsurf_qc_executed': 'sea_surface_salinity_qc_executed',
-        'met_salsurf_qc_results': 'sea_surface_salinity_qc_results',
-        'met_salsurf_qartod_executed': 'sea_surface_salinity_qartod_executed',
         'met_salsurf_qartod_results': 'sea_surface_salinity_qartod_results'
     }
     for key, value in rename.items():
@@ -182,17 +180,28 @@ def metbk_datalogger(ds, burst=False):
             ds = ds.rename({key: value})
             ds[value].attrs['ooinet_variable_name'] = key
 
-    # parse the OOI QC variables and add QARTOD style QC summary flags to the data, converting the
-    # bitmap represented flags into an integer value representing pass == 1, suspect or of high
-    # interest == 3, and fail == 4.
-    ds = parse_qc(ds)
-
     # run quality checks, adding the results to the QC summary flag
     quality_checks(ds)
 
+    # re-calculate the practical salinity from temperature and conductivity after applying the quality checks
+    practical_salinity = gsw.SP_from_C(ds.sea_surface_conductivity * 10, ds.sea_surface_temperature, 0)
+    ds['sea_surface_salinity'] = practical_salinity
+    ds['sea_surface_salinity'].attrs = {
+        'comment':  ('Salinity is generally defined as the concentration of dissolved salt in a parcel of seawater.'
+                     'Practical Salinity is a more specific unitless quantity calculated from the conductivity of '
+                     'seawater and adjusted for temperature and pressure. It is approximately equivalent to '
+                     'Absolute Salinity (the mass fraction of dissolved salt in seawater) but they are not '
+                     'interchangeable.'),
+        'long_name': 'Sea Surface Practical Salinity',
+        'coordinates': 'time lat lon',
+        'standard_name': 'sea_surface_salinity',
+        'units': 'psu',
+        'ancillary_variables': 'sea_surface_temperature sea_surface_conductivity'
+    }
+
     if burst:   # re-sample the data to a 15-minute interval using a median average
         ds['time'] = ds['time'] + np.timedelta64(450, 's')
-        burst = ds.resample(time='900s',skipna=True).median(keep_attrs=True)
+        burst = ds.resample(time='900s', skipna=True).median(dim='time', keep_attrs=True)
         burst = burst.where(~np.isnan(burst.deployment), drop=True)
 
         # save the newly average data
@@ -217,7 +226,10 @@ def metct_datalogger(ds, burst=False):
     #   internal_timestamp == doesn't exist, always empty so can remove
     ds = ds.drop(['internal_timestamp'])
     
-    # Calculate the practical salnity from temperature and conductivity
+    # run quality checks, adding the results to the QC summary flag
+    quality_checks(ds)
+
+    # Calculate the practical salinity from temperature and conductivity
     practical_salinity = gsw.SP_from_C(ds.sea_surface_conductivity * 10, ds.sea_surface_temperature, 0)
     ds['sea_surface_salinity'] = practical_salinity
     ds['sea_surface_salinity'].attrs = {
@@ -232,14 +244,6 @@ def metct_datalogger(ds, burst=False):
         'units': 'psu',
         'ancillary_variables': 'sea_surface_temperature sea_surface_conductivity'
     }
-
-    # parse the OOI QC variables and add QARTOD style QC summary flags to the data, converting the
-    # bitmap represented flags into an integer value representing pass == 1, suspect or of high
-    # interest == 3, and fail == 4.
-    ds = parse_qc(ds)
-
-    # run quality checks, adding the results to the QC summary flag
-    quality_checks(ds)
 
     if burst:   # re-sample the data to a 15-minute interval using a median average
         ds['time'] = ds['time'] + np.timedelta64(450, 's')
@@ -254,11 +258,10 @@ def metct_datalogger(ds, burst=False):
 
 def metct_instrument(ds, burst=False):
     """
-    Takes METBK-CT data recorded by the instrumednt used in the CGSN/EA moorings
+    Takes METBK-CT data recorded by the instrument used in the CGSN/EA moorings
     and cleans up the data set to make it more user-friendly.  Primary task is
-    renaming parameters and dropping some that are of limited use.
-    Additionally, re-organize some variables to permit better assessments of
-    the data.
+    renaming parameters and dropping some that are of limited use. Additionally,
+    re-organize some variables to permit better assessments of the data.
 
     :param ds: initial metbk data set downloaded from OOI via the M2M system
     :param burst: resample the 1-minute data to a 15-minute time interval
@@ -269,14 +272,10 @@ def metct_instrument(ds, burst=False):
     #   raw_temperature == unprocessed SST; unneeded (unless want to recalc SST)
     #   ctd_time == raw count of internal_timestamp
     #   raw_conductivity == unprocessed SSS; unneeded (unless want to recalc SSS)
-    ds = ds.drop(['internal_timestamp', 'ctd_time', 'raw_temperature', 'raw_conductivity'])
-    
-    # Fix the serial numbers
-    sn_attrs = ds['serial_number'].attrs
-    ds['serial_number'] = ds['serial_number'].astype(str).str.join(dim='string7')
-    ds['serial_number'].attrs = sn_attrs
-    
-    # Calculate the practical salnity from temperature and conductivity
+    #   serial_number == in the attributes, don't need as a variable
+    ds = ds.drop(['internal_timestamp', 'ctd_time', 'raw_temperature', 'raw_conductivity', 'serial_number'])
+
+    # Calculate the practical salinity from temperature and conductivity
     practical_salinity = gsw.SP_from_C(ds.sea_surface_conductivity * 10, ds.sea_surface_temperature, 0)
     ds['sea_surface_salinity'] = practical_salinity
     ds['sea_surface_salinity'].attrs = {
@@ -291,14 +290,6 @@ def metct_instrument(ds, burst=False):
         'units': 'psu',
         'ancillary_variables': 'sea_surface_temperature sea_surface_conductivity'
     }
-
-    # parse the OOI QC variables and add QARTOD style QC summary flags to the data, converting the
-    # bitmap represented flags into an integer value representing pass == 1, suspect or of high
-    # interest == 3, and fail == 4.
-    ds = parse_qc(ds)
-
-    # run quality checks, adding the results to the QC summary flag
-    quality_checks(ds)
 
     if burst:   # re-sample the data to a 15-minute interval using a median average
         ds['time'] = ds['time'] + np.timedelta64(450, 's')
@@ -379,6 +370,7 @@ def main(argv=None):
         os.makedirs(os.path.dirname(out_file))
 
     metbk.to_netcdf(out_file, mode='w', format='NETCDF4', engine='h5netcdf', encoding=ENCODINGS)
+    return None
 
 
 if __name__ == '__main__':
