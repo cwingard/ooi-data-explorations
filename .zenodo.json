@@ -1,0 +1,81 @@
+{
+  "upload_type": "software",
+  "title": "github.com/oceanobservatories/ooi-data-explorations",
+  "creators": [
+    {
+      "name": "Wingard, Christopher",
+      "affiliation": "Oregon State University",
+      "orcid": "0000-0003-4732-8460"
+    },
+    {
+      "name": "Risien, Craig",
+      "affiliation": "Oregon State University",
+      "orcid": "0000-0002-2826-9488"
+    },
+    {
+      "name": "Desiderio, Russell",
+      "affiliation": "Oregon State University"
+    },
+    {
+      "name": "Black, Ian",
+      "affiliation": "Oregon State University",
+      "orcid": "0009-0009-4430-3875"
+    },
+    {
+      "name": "Reed, Andrew",
+      "affiliation": "Woods Hole Oceanographic Institution",
+      "orcid": "0000-0003-3478-6964"
+    },
+    {
+      "name": "Ruef, Wendi",
+      "affiliation": "University of Washington",
+      "orcid": "0000-0003-4642-5357"
+    }
+  ],
+  "description": "<h1>NSF Ocean Observatories Initiative (OOI) Data Explorations</h1>\n<p>Python modules and shell scripts used to parse the <a href=\"https://rawdata.oceanobservatories.org/files/\">raw data files</a> logged by the custom-built <a href=\"https://oceanobservatories.org\">OOI</a> surface and profiler mooring control systems. These systems are used to control and record sensors on the surface and profiler moorings used in the&nbsp;<a href=\"https://oceanobservatories.org/research-arrays/\">OOI Coastal and Global Arrays</a>. The resulting parsed data is saved in JSON files for further processing, analysis and plotting. Several tools in multiple languages (your browser, Matlab, Python, R, Java, etc.) exist that will enable a user to load a parsed JSON formatted data file for further processing and review.</p>\n<p>The parsers convert the data from the different formats found in the raw log files (binary, ASCII, ASCIIHEX, mixed ASCII/binary) into a common format (JSON) that can be used for further processing and analysis. They do not convert the data values (for the most part) found within the raw data. In other words, if a particular measurement contained in the raw data file is reported in counts, the parser <em>does not</em> convert that measurement to scientific units.&nbsp;</p>\n<p>An exception to the above conversion applies to calculating an Epoch time stamp (seconds since 1970-01-01) from the date and time string information contained in the files. The preferred source of time is the data looger timestamp as those are synced to GPS via a LAN NTP server and their clocks are accurate to within a few milliseconds.</p>\n<p>The code is used internally by the operations teams at <a href=\"https://ceoas.oregonstate.edu/ocean-observatories-initiative-ooi\">Oregon State University</a> (managing the uncabled elements of the Coastal Endurance Array) and <a href=\"https://www.whoi.edu/\">Woods Hole Oceanographic Institution</a> (managing the Coastal Pioneer and Global Irminger and Station Papa arrays) to monitor the system health of the moorings and current environmental conditions.</p>\n<p>This code is provided \"as-is\" for other users who may wish to interact directly with the <a href=\"https://rawdata.oceanobservatories.org/files/\" rel=\"nofollow\">raw data</a>.</p>\n<p><em>The source for this code is maintained separately on&nbsp;Bitbucket and is mirrored on GitHub solely for integration with Zenodo. The URL for the source repository is </em><a href=\"https://bitbucket.org/ooicgsn/cgsn-parsers\"><em>https://bitbucket.org/ooicgsn/cgsn-parsers</em></a></p>",
+  "access_right": "open",
+  "license": "MIT",
+  "keywords": [
+    "Ocean Observatories Initiative",
+    "ocean observing",
+    "long-term ecological observatories",
+    "oceanography",
+    "marine science",
+    "data parsing",
+    "data processing",
+    "data analysis"
+  ],
+  "notes": "",
+  "contributors": [
+    {
+      "name": "Peters, Joffrey",
+      "type": "Other",
+      "affiliation": "Woods Hole Oceanographic Institute"
+    },
+    {
+      "name": "Stoltz, Linus",
+      "type": "Other",
+      "affiliation": "Commercial Fisheries Research Foundation",
+      "orcid": "0000-0002-3780-1739"
+    },
+    {
+      "name": "Fram, Jonathan",
+      "type": "Other",
+      "affiliation": "Oregon State University",
+      "orcid": "0000-0002-9937-6272"
+    },
+    {
+      "name": "Cervantes, Brandy",
+      "type": "Other",
+      "affiliation": "Oregon State University",
+      "orcid": "0000-0001-7927-9195"
+    },
+    {
+      "name": "Hewett, Kate",
+      "type": "Other",
+      "affiliation": "University of Washington"
+    }
+  ],
+  "communities": [{"identifier": "nsf-ooi"}],
+  "grants": [{"id": "10.13039/100000001::2244833"}]
+}
