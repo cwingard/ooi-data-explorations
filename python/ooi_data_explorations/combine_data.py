@@ -10,6 +10,8 @@ import glob
 import numpy as np
 import os
 import sys
+
+import pandas as pd
 import xarray as xr
 
 
@@ -122,17 +124,18 @@ def combine_datasets(tdata, rhdata, ridata, resample_time):
                 avg[v] = avg[v].astype(ds[v].dtype)
                 avg[v].attrs = ds[v].attrs
 
-        avg.time.attrs['long_name'] = 'Time'
-        avg.time.attrs['standard_name'] = 'time'
-        avg.time.attrs['axis'] = 'T'
-        avg.time.attrs['units'] = 'seconds since 1900-01-01T00:00:00.000Z'
-        avg.time.attrs['calendar'] = 'gregorian'
-        avg.time.attrs['ioos_category'] = 'Time'
-        avg.time.encoding = {
+        # add the time variable attributes
+        avg['time'].attrs = dict({
+            'long_name': 'Time',
+            'standard_name': 'time',
+            'axis': 'T',
+        })
+        avg['time'].encoding = dict({
             '_FillValue': None,
             'units': 'seconds since 1900-01-01T00:00:00.000Z',
-            'calendar': 'gregorian'
-        }
+            'calendar': 'standard',
+            'dtype': 'float64'
+        })
     else:
         avg = ds
 

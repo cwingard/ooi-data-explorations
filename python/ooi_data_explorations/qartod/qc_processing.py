@@ -11,6 +11,7 @@ import pandas as pd
 import sys
 
 from scipy.stats import normaltest
+from scipy.stats import median_abs_deviation as mad
 import dask
 from dask.diagnostics import ProgressBar
 
@@ -241,10 +242,6 @@ def format_climatology(parameter, clm, sensor_range, depth_bins, site, node, sen
         source = ''
 
     # create the lookup dictionary
-    var_explained = clm.regression['variance_explained']
-    if len(var_explained) == 0:
-        var_explained = [0]
-
     qc_dict = {
         'subsite': site,
         'node': node,
@@ -253,13 +250,23 @@ def format_climatology(parameter, clm, sensor_range, depth_bins, site, node, sen
         'parameters': {'inp': parameter, 'tinp': 'time', 'zinp': 'None'},
         'climatologyTable': 'climatology_tables/{}-{}-{}-{}.csv'.format(site, node, sensor, parameter),
         'source': source,
-        'notes': 'The variance explained by the climatological model is {:.1%}.'.format(var_explained[0])
     }
+
+    # set the number of standard deviations to use for the climatology test limits
+    if expanded:
+        nx = 5
+    else:
+        nx = 3
+
+    # pull out the variance explained by the climatology model and set to 0 if not available
+    var_explained = clm.regression['variance_explained']
+    if len(var_explained) == 0:
+        var_explained = [0]
 
     # create the climatology table
     for idx, mu in enumerate(clm.monthly_fit):
         # use the index number to create the header row
-        header_str += ',"[{}, {}]"'.format(idx+1, idx+1)
+        header_str += ',"[{}, {}]"'.format(idx + 1, idx + 1)
 
         # calculate the climatological ranges
         cmin = mu - clm.monthly_std.values[idx] * stdx
@@ -272,6 +279,15 @@ def format_climatology(parameter, clm, sensor_range, depth_bins, site, node, sen
 
         # append the data to ranges
         value_str += ',"[{:.5f}, {:.5f}]"'.format(cmin, cmax)
+
+        # update the notes
+        if var_explained[0] < 0.15:
+            qc_dict['notes'] = ('The climatological ranges are based on the monthly mean plus/minus {}x '
+                                'the monthly standard deviations.'.format(nx))
+        else:
+            qc_dict['notes'] = ('The climatological ranges are based on a 2-cycle harmonic fit to the monthly means '
+                                'plus/minus {}x the monthly standard deviations. The variance explained by the '
+                                'climatological model is {:.1%}.'.format(nx, var_explained[0]))
 
     clm_table = header_str + '\n' + value_str
 
@@ -288,14 +304,20 @@ def process_climatology(ds, parameters, sensor_range, **kwargs):
     :param parameters: list of the parameter name(s) of the variable(s) used for
         the calculated climatology
     :param sensor_range: list of vendor defined ranges for valid data
-    :keyword depth_bins: 2D array of WOA depth bins
-    :keyword site: Site designator, extracted from the first part of the
+    :**depth_bins: 2D array of WOA depth bins
+    :**fixed_lower: boolean flag to set the lower range to the sensor range
+        (optional input)
+    :**fixed_upper: boolean flag to set the upper range to the sensor range
+        (optional input)
+    :**expanded: boolean flag to use 3 or 5x the standard deviation for the
+        user range (optional input, default is 3x)
+    :**site: Site designator, extracted from the first part of the
         reference designator (optional input)
-    :keyword node: Node designator, extracted from the second part of the
+    :**node: Node designator, extracted from the second part of the
         reference designator (optional input)
-    :keyword sensor: Sensor designator, extracted from the third and fourth
+    :**sensor: Sensor designator, extracted from the third and fourth
         part of the reference designator (optional input)
-    :keyword stream: Stream name that contains the data of interest
+    :**stream: Stream name that contains the data of interest
         (optional input)
     :return clm_lookup: a pandas Dataframe corresponding to the values used to
         create the QARTOD lookup tables for the climatology test
@@ -304,6 +326,9 @@ def process_climatology(ds, parameters, sensor_range, **kwargs):
     """
     # process the optional keyword arguments
     depth_bins = kwargs.get('depth_bins')
+    fixed_lower = kwargs.get('fixed_lower')
+    fixed_upper = kwargs.get('fixed_upper')
+    expanded = kwargs.get('expanded')
     site = kwargs.get('site')
     node = kwargs.get('node')
     sensor = kwargs.get('sensor')
@@ -354,6 +379,10 @@ def process_climatology(ds, parameters, sensor_range, **kwargs):
                     # create the formatted dictionary for the lookup tables
                     qc_dict, clm_table = format_climatology(param, clm, sensor_range[idx], bins, site, node, sensor,
                                                             stream, fixed_lower, fixed_upper, stdx)
+
+                    else:
+                        qc_dict, clm_table = format_climatology(param, clm, sensor_range[idx], bins, site, node, sensor,
+                                                                stream, fixed_lower, fixed_upper, expanded=True)
 
                     # append the dictionary to the dataframe and build the depth table
                     df = (pd.Series(qc_dict).to_frame()).transpose()
@@ -434,24 +463,37 @@ def process_gross_range(ds, parameters, sensor_range, **kwargs):
     Using the data in a xarray dataset and a list of parameter(s), calculate
     a gross ranges (long term average plus/minus 3 standard deviations) for
     each parameter and create formatted outputs that can be saved to the
-    qc_lookup tables used by OOI for QARTOD testing.
+    qc_lookup tables used by OOI for QARTOD testing. Exceptions are made for
+    parameters that are not normally distributed, where the user range is
+    based on the median and median absolute deviation. Additionally, the user
+    range can be expanded to 5 times the standard deviation or median absolute
+    deviation.
 
     :param ds: dataset with the parameter(s) to use in developing a gross range
     :param parameters: list of the parameter name(s) of the variable(s) used for
         the calculated user portion of the gross range test
     :param sensor_range: list of vendor defined ranges for valid data
-    :keyword site: Site designator, extracted from the first part of the
+    :**fixed_lower: boolean flag to set the lower range to the sensor range
+        (optional input)
+    :**fixed_upper: boolean flag to set the upper range to the sensor range
+        (optional input)
+    :**expanded: boolean flag to use 3 or 5x the standard deviation or MAD for
+        the user range (optional input, default is 3x)
+    :**site: Site designator, extracted from the first part of the
         reference designator (optional input)
-    :keyword node: Node designator, extracted from the second part of the
+    :**node: Node designator, extracted from the second part of the
         reference designator (optional input)
-    :keyword sensor: Sensor designator, extracted from the third and fourth
+    :**sensor: Sensor designator, extracted from the third and fourth
         part of the reference designator (optional input)
-    :keyword stream: Stream name that contains the data of interest
+    :**stream: Stream name that contains the data of interest
         (optional input)
     :return: a pandas Dataframe corresponding to the values used to create the
         QARTOD lookup tables for the gross range test
     """
     # process the optional keyword arguments
+    fixed_lower = kwargs.get('fixed_lower')
+    fixed_upper = kwargs.get('fixed_upper')
+    expanded = kwargs.get('expanded')
     site = kwargs.get('site')
     node = kwargs.get('node')
     sensor = kwargs.get('sensor')
@@ -470,12 +512,20 @@ def process_gross_range(ds, parameters, sensor_range, **kwargs):
     # create an empty pandas dataframe to hold the results
     gross_range = []
 
-    # loop through the parameter(s) of interest
+    # set the number of standard deviations to use for the gross range test limits
+    if not expanded:
+        nx = 3
+    else:
+        nx = 5
+
+    # loop through the parameter(s) of interest, roughly estimating if the data is normally distributed using a
+    # bootstrap analysis to randomly select 4500 data points to use, running the test a total of 5000 times
     sensor_range = np.atleast_2d(sensor_range).tolist()
     for idx, param in enumerate(parameters):
         if param in ds.variables:
-            # roughly estimate if the data is normally distributed using a bootstrap analysis to randomly select
-            # 4500 data points to use, running the test a total of 5000 times
+            # Select out the data array of the desired param. This speeds up the processing
+            m = (ds[param] > sensor_range[idx][0]) & (ds[param] < sensor_range[idx][1]) & (~np.isnan(ds[param]))
+            da = ds[param][m]
 
             # Utilize dask to parallelize the random choice and calculate the pnorm
             random_choice = dask.delayed(np.random.choice)
@@ -511,7 +561,7 @@ def process_gross_range(ds, parameters, sensor_range, **kwargs):
                              'distributed. Percentiles were chosen to cover 99.7% of the data, approximating the '
                              'Empirical Rule.')
             else:
-                # most likely this data is normally distributed, or close enough, and we can use the Empirical Rule
+                # most likely this data is normally distributed, or close enough, and we can use the mean
                 mu = da.mean().values
                 sd = da.std().values
                 lower = mu - sd * stdx
@@ -632,6 +682,8 @@ def inputs(argv=None):
     parser.add_argument("-n", "--node", dest="node", type=str, required=True)
     parser.add_argument("-sn", "--sensor", dest="sensor", type=str, required=True)
     parser.add_argument("-co", "--cut_off", dest="cut_off", type=str, required=False)
+    parser.add_argument("-dp", "--deploy", dest="deployment", type=int, required=False)
+    parser.add_argument("-cn", "--cruise", dest="cruise", type=str, required=False)
 
     # parse the input arguments and create a parser object
     args = parser.parse_args(argv)

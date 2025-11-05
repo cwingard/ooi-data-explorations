@@ -382,7 +382,7 @@ def optaa_datalogger(ds, cal_file, a_purewater_file = None, c_purewater_file=Non
     # drop some of the variables:
     #   internal_timestamp == time, redundant so can remove
     #   pressure_counts == none of the OOI OPTAAs have a pressure sensor
-    ds = ds.drop(['internal_timestamp', 'pressure_counts'])
+    ds = ds.drop_vars(['internal_timestamp', 'pressure_counts'])
 
     # check for data from a co-located CTD, if not present create the variables using NaN's as the fill value
     if 'sea_water_temperature' not in ds.variables:
@@ -392,7 +392,7 @@ def optaa_datalogger(ds, cal_file, a_purewater_file = None, c_purewater_file=Non
     # pull out the number of wavelengths and serial number and then drop the variable (part of the metadata)
     num_wavelengths = ds.num_wavelengths.values[0].astype(int)
     serial_number = int(re.sub('[^0-9]', '', ds.attrs['SerialNumber']))
-    ds = ds.drop('num_wavelengths')
+    ds = ds.drop_vars('num_wavelengths')
 
     # load the calibration coefficients
     uid = ds.attrs['AssetUniqueID']
@@ -496,7 +496,7 @@ def optaa_datalogger(ds, cal_file, a_purewater_file = None, c_purewater_file=Non
     }, coords={'time': (['time'], burst.time.values), 'wavelength_number': wavelength_number})
 
     # drop the original 2D variables from the burst data set
-    drop = burst.drop(['wavelength_number', 'wavelength_a', 'a_signal', 'a_reference',
+    drop = burst.drop_vars(['wavelength_number', 'wavelength_a', 'a_signal', 'a_reference',
                        'optical_absorption', 'apg', 'apg_ts', 'apg_ts_s',
                        'wavelength_c', 'c_signal', 'c_reference',
                        'beam_attenuation', 'cpg', 'cpg_ts'])
@@ -566,7 +566,7 @@ def optaa_cspp(ds, cal_file):
     #   profiler_timestamp == internal_timestamp == time, redundant so can remove
     #   suspect_timestamp = not used
     #   pressure_counts == none of the OOI OPTAAs have a pressure sensor
-    ds = ds.drop(['internal_timestamp', 'profiler_timestamp', 'suspect_timestamp', 'pressure_counts'])
+    ds = ds.drop_vars(['internal_timestamp', 'profiler_timestamp', 'suspect_timestamp', 'pressure_counts'])
 
     # check for data from a co-located CTD, if not present create the variables using NaN's as the fill value
     if 'sea_water_temperature' not in ds.variables:
@@ -576,7 +576,7 @@ def optaa_cspp(ds, cal_file):
     # pull out the number of wavelengths and serial number and then drop the variable (part of the metadata)
     num_wavelengths = ds.num_wavelengths.values[0].astype(int)
     serial_number = int(re.sub('[^0-9]', '', ds.attrs['SerialNumber']))
-    ds = ds.drop('num_wavelengths')
+    ds = ds.drop_vars('num_wavelengths')
 
     # load the calibration coefficients
     uid = ds.attrs['AssetUniqueID']
@@ -634,7 +634,7 @@ def optaa_cspp(ds, cal_file):
                            desc='Smoothing and binning each profile into 25 cm depth bins', file=sys.stdout))
 
     # reset the dataset now using binned profiles
-    binned = [i[0] for i in binned if i is not None]
+    binned = [i for i in binned if i is not None]
     binned = xr.concat(binned, 'time')
     binned = binned.sortby(['profile', 'time'])
 
@@ -690,7 +690,7 @@ def optaa_cspp(ds, cal_file):
     }, coords={'time': (['time'], binned.time.values), 'wavelength_number': wavelength_number})
 
     # drop the original 2D variables from the binned data set
-    drop = binned.drop(['wavelength_number', 'wavelength_a', 'a_signal', 'a_reference',
+    drop = binned.drop_vars(['wavelength_number', 'wavelength_a', 'a_signal', 'a_reference',
                         'optical_absorption', 'apg', 'apg_ts', 'apg_ts_s',
                         'wavelength_c', 'c_signal', 'c_reference',
                         'beam_attenuation', 'cpg', 'cpg_ts'])

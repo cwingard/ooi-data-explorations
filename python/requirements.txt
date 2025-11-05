@@ -1,4 +1,4 @@
-xarray>=0.15.1
+xarray[accel]>=0.15.1
 munch>=2.5.0
 tqdm>=4.46.0
 urllib3>=1.25.8
@@ -9,3 +9,8 @@ requests>=2.23.0
 scipy>=1.7.2
 beautifulsoup4>=4.9.0
 PyYAML>=5.3.1
+matplotlib
+ntplib
+pandas
+netcdf4
+h5netcdf

@@ -40,7 +40,7 @@ dependencies:
   - simplejson
   - sockjs-tornado
   - tqdm
-  - xarray
+  - xarray[accel]>=0.15.1
   - xlrd
   - yaml
   - pip:

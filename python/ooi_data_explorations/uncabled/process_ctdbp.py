@@ -3,6 +3,7 @@
 import numpy as np
 import os
 
+import pandas as pd
 from ooi_data_explorations.common import inputs, m2m_collect, m2m_request, get_deployment_dates, \
     get_vocabulary, dt64_epoch, update_dataset, ENCODINGS
 
@@ -25,7 +26,7 @@ def ctdbp_datalogger(ds, burst=False):
     drop_vars = ['dcl_controller_timestamp', 'date_time_string']
     for v in drop_vars:
         if v in ds.variables:
-            ds = ds.drop(v)
+            ds = ds.drop_vars(v)
 
     # convert the time values from a datetime64[ns] object to a floating point number with the time in seconds
     ds['internal_timestamp'] = ('time', dt64_epoch(ds.internal_timestamp))
@@ -107,7 +108,7 @@ def ctdbp_instrument(ds, burst=False):
                  'pressure_qc_executed', 'pressure_qc_results']
     for v in drop_vars:
         if v in ds.variables:
-            ds = ds.drop(v)
+            ds = ds.drop_vars(v)
 
     # rename some of the variables for better clarity, two blocks to keep from stepping on ourselves
     rename = {

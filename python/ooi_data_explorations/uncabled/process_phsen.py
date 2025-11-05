@@ -118,7 +118,7 @@ ATTRS = {
         'long_name': 'Thermistor Temperature',
         'comment': ('Thermistor temperature refers to the internal instrument temperature of the pH sensor, as '
                     'measured by the thermistor. It is used to determine salinity and temperature dependent molar '
-                    'absorptivities in the seawater sample in order to make an accurate pH estimation. This '
+                    'absorptivity in the seawater sample in order to make an accurate pH estimation. This '
                     'variable represents the thermistor temperature measured at the end of the measurement cycle'),
         'units': 'degrees_Celsius',
         'ancillary_variables': 'raw_thermistor_end'
@@ -152,7 +152,7 @@ ATTRS = {
 def quality_checks(ds):
     """
     Assessment of the raw data and the calculated seawater pH for quality
-    using a susbset of the QARTOD flags to indicate the quality. QARTOD
+    using a subsets of the QARTOD flags to indicate the quality. QARTOD
     flags used are:
 
         1 = Pass
@@ -236,8 +236,9 @@ def phsen_datalogger(ds):
     #   phsen_abcdef_signal_intensity_434, part of the light measurements array, redundant so can remove
     #   phsen_abcdef_signal_intensity_578, part of the light measurements array, redundant so can remove
     ds = ds.reset_coords()
-    ds = ds.drop(['passed_checksum', 'record_type', 'record_time', 'phsen_abcdef_signal_intensity_434',
-                  'phsen_abcdef_signal_intensity_578', 'dcl_controller_timestamp'])
+    ds = ds.drop_vars(['passed_checksum', 'record_type', 'record_time', 'phsen_abcdef_signal_intensity_434',
+                       'phsen_abcdef_signal_intensity_578', 'dcl_controller_timestamp',
+                       'ph_seawater_qc_executed', 'ph_seawater_qc_results'])
 
     # convert the time values from a datetime64[ns] object to a floating point number with the time in seconds
     ds['internal_timestamp'] = ('time', dt64_epoch(ds.internal_timestamp))
@@ -254,12 +255,13 @@ def phsen_datalogger(ds):
     # rename some of the variables for better clarity
     rename = {
         'voltage_battery': 'raw_battery_voltage',
+        'phsen_battery_volts': 'battery_voltage',
         'thermistor_start': 'raw_thermistor_start',
         'thermistor_end': 'raw_thermistor_end',
         'phsen_thermistor_temperature': 'thermistor_temperature',
         'ph_seawater': 'seawater_ph',
-        'ph_seawater_qc_executed': 'seawater_ph_qc_executed',
-        'ph_seawater_qc_results': 'seawater_ph_qc_results',
+        'ph_seawater_qartod_results': 'seawater_ph_qartod_results',
+        'ph_seawater_qartod_executed': 'seawater_ph_qartod_executed'
     }
     for key, value in rename.items():
         if key in ds.variables:
@@ -277,13 +279,13 @@ def phsen_datalogger(ds):
     reference_578 = light[:, :, 2]            # reference signal, 578 nm
     signal_578 = light[:, :, 3]               # signal intensity, 578 nm (PH578SI_L0)
 
-    refnc = np.array(np.vstack(ds['reference_light_measurements'].values), dtype='int32')
-    refnc = np.atleast_3d(refnc)
-    refnc = np.reshape(refnc, (nrec, 4, 4))   # 4 sets of 4 DI water measurements (blanks)
-    blank_refrnc_434 = refnc[:, :, 0]  # DI blank reference, 434 nm
-    blank_signal_434 = refnc[:, :, 1]  # DI blank signal, 434 nm
-    blank_refrnc_578 = refnc[:, :, 2]  # DI blank reference, 578 nm
-    blank_signal_578 = refnc[:, :, 3]  # DI blank signal, 578 nm
+    refrnc = np.array(np.vstack(ds['reference_light_measurements'].values), dtype='int32')
+    refrnc = np.atleast_3d(refrnc)
+    refrnc = np.reshape(refrnc, (nrec, 4, 4))   # 4 sets of 4 DI water measurements (blanks)
+    blank_refrnc_434 = refrnc[:, :, 0]  # DI blank reference, 434 nm
+    blank_signal_434 = refrnc[:, :, 1]  # DI blank signal, 434 nm
+    blank_refrnc_578 = refrnc[:, :, 2]  # DI blank reference, 578 nm
+    blank_signal_578 = refrnc[:, :, 3]  # DI blank signal, 578 nm
 
     # create a data set with the reference and light measurements
     ph = xr.Dataset({
@@ -298,15 +300,15 @@ def phsen_datalogger(ds):
     }, coords={'time': ds['time'], 'measurements': np.arange(0, 23).astype('int32'),
                'blanks': np.arange(0, 4).astype('int32')
                })
-    ds = ds.drop(['reference_light_measurements_dim_0', 'spectrum', 'light_measurements',
+    ds = ds.drop_vars(['reference_light_measurements_dim_0', 'spectrum', 'light_measurements',
                   'reference_light_measurements'])
 
     # these two-dimensional variables may or may not be present depending on how the data was requested.
     # remove them if they do exist, so we can merge different data sets together
     maybe = ['phsen_abcdef_signal_intensity_434_dim_0', 'phsen_abcdef_signal_intensity_578_dim_0']
-    for k, v in ds.dims.items():
+    for k in [i for i in ds.coords]:
         if k in maybe:
-            ds = ds.drop(k)
+            ds = ds.drop_vars(k)
 
     # merge the data sets back together
     ds = ds.merge(ph)
@@ -344,17 +346,19 @@ def phsen_instrument(ds):
     #   record_type == not used
     #   record_time == internal_timestamp == time, redundant so can remove both
     ds = ds.reset_coords()
-    ds = ds.drop(['record_type', 'record_time', 'internal_timestamp'])
+    ds = ds.drop_vars(['record_type', 'record_time', 'internal_timestamp',
+                       'ph_seawater_qc_executed', 'ph_seawater_qc_results'])
 
     # rename some of the variables for better clarity
     rename = {
         'voltage_battery': 'raw_battery_voltage',
+        'phsen_battery_volts': 'battery_voltage',
         'thermistor_start': 'raw_thermistor_start',
         'thermistor_end': 'raw_thermistor_end',
         'phsen_thermistor_temperature': 'thermistor_temperature',
         'ph_seawater': 'seawater_ph',
-        'ph_seawater_qc_executed': 'seawater_ph_qc_executed',
-        'ph_seawater_qc_results': 'seawater_ph_qc_results'
+        'ph_seawater_qartod_results': 'seawater_ph_qartod_results',
+        'ph_seawater_qartod_executed': 'seawater_ph_qartod_executed'
     }
     # add the original variable name as an attribute, if renamed
     for key, value in rename.items():
@@ -373,13 +377,13 @@ def phsen_instrument(ds):
     reference_578 = light[:, :, 2]            # reference signal, 578 nm
     signal_578 = light[:, :, 3]               # signal intensity, 578 nm (PH578SI_L0)
 
-    refnc = np.array(np.vstack(ds['reference_light_measurements'].values), dtype='int32')
-    refnc = np.atleast_3d(refnc)
-    refnc = np.reshape(refnc, (nrec, 4, 4))   # 4 sets of 4 DI water measurements (blanks)
-    blank_refrnc_434 = refnc[:, :, 0]  # DI blank reference, 434 nm
-    blank_signal_434 = refnc[:, :, 1]  # DI blank signal, 434 nm
-    blank_refrnc_578 = refnc[:, :, 2]  # DI blank reference, 578 nm
-    blank_signal_578 = refnc[:, :, 3]  # DI blank signal, 578 nm
+    refrnc = np.array(np.vstack(ds['reference_light_measurements'].values), dtype='int32')
+    refrnc = np.atleast_3d(refrnc)
+    refrnc = np.reshape(refrnc, (nrec, 4, 4))   # 4 sets of 4 DI water measurements (blanks)
+    blank_refrnc_434 = refrnc[:, :, 0]  # DI blank reference, 434 nm
+    blank_signal_434 = refrnc[:, :, 1]  # DI blank signal, 434 nm
+    blank_refrnc_578 = refrnc[:, :, 2]  # DI blank reference, 578 nm
+    blank_signal_578 = refrnc[:, :, 3]  # DI blank signal, 578 nm
 
     # create a data set with the reference and light measurements
     ph = xr.Dataset({
@@ -394,15 +398,15 @@ def phsen_instrument(ds):
     }, coords={'time': ds['time'], 'measurements': np.arange(0, 23).astype('int32'),
                'blanks': np.arange(0, 4).astype('int32')
                })
-    ds = ds.drop(['light_measurements', 'reference_light_measurements', 'spectrum',
+    ds = ds.drop_vars(['light_measurements', 'reference_light_measurements', 'spectrum',
                   'reference_light_measurements_dim_0'])
 
     # these two-dimensional variables may or may not be present depending on how the data was requested.
     # remove them if they do exist, so we can merge different data sets together
     maybe = ['phsen_abcdef_signal_intensity_434_dim_0', 'phsen_abcdef_signal_intensity_578_dim_0']
-    for k, v in ds.dims.items():
+    for k in [i for i in ds.coords]:
         if k in maybe:
-            ds = ds.drop(k)
+            ds = ds.drop_vars(k)
 
     # merge the data sets back together
     ds = ds.merge(ph)
@@ -443,22 +447,23 @@ def phsen_imodem(ds):
     #   phsen_abcdef_signal_intensity_434, part of the light measurements array, redundant so can remove
     #   phsen_abcdef_signal_intensity_578, part of the light measurements array, redundant so can remove
     ds = ds.reset_coords()
-    for variable in ['passed_checksum', 'record_type', 'record_time', 'internal_timestamp',
-                     'phsen_abcdef_signal_intensity_434', 'phsen_abcdef_signal_intensity_578']:
-        try:
-            ds = ds.drop_vars(variable)
-        except:
-            pass
+    drop_vars = ['passed_checksum', 'record_type', 'record_time', 'internal_timestamp',
+                 'phsen_abcdef_signal_intensity_434', 'phsen_abcdef_signal_intensity_578',
+                 'ph_seawater_qc_executed', 'ph_seawater_qc_results']
+    for var in ds.variables:
+        if var in drop_vars:
+            ds = ds.drop_vars(var)
 
     # rename some of the variables for better clarity
     rename = {
         'voltage_battery': 'raw_battery_voltage',
+        'phsen_battery_volts': 'battery_voltage',
         'thermistor_start': 'raw_thermistor_start',
         'thermistor_end': 'raw_thermistor_end',
         'phsen_thermistor_temperature': 'thermistor_temperature',
         'ph_seawater': 'seawater_ph',
-        'ph_seawater_qc_executed': 'seawater_ph_qc_executed',
-        'ph_seawater_qc_results': 'seawater_ph_qc_results'
+        'ph_seawater_qartod_results': 'seawater_ph_qartod_results',
+        'ph_seawater_qartod_executed': 'seawater_ph_qartod_executed'
     }
     for key in rename.keys():
         if key in ds.variables:
@@ -475,13 +480,13 @@ def phsen_imodem(ds):
     reference_578 = light[:, :, 2]            # reference signal, 578 nm
     signal_578 = light[:, :, 3]               # signal intensity, 578 nm (PH578SI_L0)
 
-    refnc = np.array(np.vstack(ds['reference_light_measurements'].values), dtype='int32')
-    refnc = np.atleast_3d(refnc)
-    refnc = np.reshape(refnc, (nrec, 4, 4))   # 4 sets of 4 DI water measurements (blanks)
-    blank_refrnc_434 = refnc[:, :, 0]  # DI blank reference, 434 nm
-    blank_signal_434 = refnc[:, :, 1]  # DI blank signal, 434 nm
-    blank_refrnc_578 = refnc[:, :, 2]  # DI blank reference, 578 nm
-    blank_signal_578 = refnc[:, :, 3]  # DI blank signal, 578 nm
+    refrnc = np.array(np.vstack(ds['reference_light_measurements'].values), dtype='int32')
+    refrnc = np.atleast_3d(refrnc)
+    refrnc = np.reshape(refrnc, (nrec, 4, 4))   # 4 sets of 4 DI water measurements (blanks)
+    blank_refrnc_434 = refrnc[:, :, 0]  # DI blank reference, 434 nm
+    blank_signal_434 = refrnc[:, :, 1]  # DI blank signal, 434 nm
+    blank_refrnc_578 = refrnc[:, :, 2]  # DI blank reference, 578 nm
+    blank_signal_578 = refrnc[:, :, 3]  # DI blank signal, 578 nm
 
     # create a data set with the reference and light measurements
     ph = xr.Dataset({
@@ -496,7 +501,7 @@ def phsen_imodem(ds):
     }, coords={'time': ds['time'], 'measurements': np.arange(0, 23).astype('int32'),
                'blanks': np.arange(0, 4).astype('int32')
                })
-    ds = ds.drop(['light_measurements', 'reference_light_measurements', 'spectrum',
+    ds = ds.drop_vars(['light_measurements', 'reference_light_measurements', 'spectrum',
                   'reference_light_measurements_dim_0'])
 
     # merge the data sets back together
@@ -584,7 +589,7 @@ def main(argv=None):
         os.makedirs(os.path.dirname(out_file))
 
     phsen.to_netcdf(out_file, mode='w', format='NETCDF4', engine='h5netcdf', encoding=ENCODINGS)
-
+    return None
 
 if __name__ == '__main__':
     main()

@@ -1,0 +1,81 @@
+{
+  "upload_type": "software",
+  "title": "github.com/oceanobservatories/ooi-data-explorations",
+  "creators": [
+    {
+      "name": "Wingard, Christopher",
+      "affiliation": "Oregon State University",
+      "orcid": "0000-0003-4732-8460"
+    },
+    {
+      "name": "Risien, Craig",
+      "affiliation": "Oregon State University",
+      "orcid": "0000-0002-2826-9488"
+    },
+    {
+      "name": "Desiderio, Russell",
+      "affiliation": "Oregon State University"
+    },
+    {
+      "name": "Black, Ian",
+      "affiliation": "Oregon State University",
+      "orcid": "0009-0009-4430-3875"
+    },
+    {
+      "name": "Reed, Andrew",
+      "affiliation": "Woods Hole Oceanographic Institution",
+      "orcid": "0000-0003-3478-6964"
+    },
+    {
+      "name": "Ruef, Wendi",
+      "affiliation": "University of Washington",
+      "orcid": "0000-0003-4642-5357"
+    }
+  ],
+  "description": "<h1>NSF Ocean Observatories Initiative (OOI) Data Explorations</h1>\n<p>Matlab, Python and R modules and scripts used to access <a href=\"https://oceanobservatories.org\">OOI</a> data recorded by the large variety of sensors deployed across all of the <a href=\"https://oceanobservatories.org\">OOI</a> arrays. The code provided here was developed as a tool for the user community looking to access OOI data and as a toolset for the OOI Data Teams to use in QC-related reviews and assessments of the data. This code is provided to the larger community as-is in the hopes that it will be of use.</p>",
+  "access_right": "open",
+  "license": "MIT",
+  "keywords": [
+    "Ocean Observatories Initiative",
+    "ocean observing",
+    "long-term ecological observatories",
+    "oceanography",
+    "marine science",
+    "data parsing",
+    "data processing",
+    "data analysis"
+  ],
+  "notes": "The python code can be obtained from either <a href=\"https://pypi.org/project/ooi-data-explorations/\">PyPI</a> or <a href=\"https://anaconda.org/conda-forge/ooi-data-explorations\">conda-forge</a>",
+  "contributors": [
+    {
+      "name": "Peters, Joffrey",
+      "type": "Other",
+      "affiliation": "Woods Hole Oceanographic Institute"
+    },
+    {
+      "name": "Stoltz, Linus",
+      "type": "Other",
+      "affiliation": "Commercial Fisheries Research Foundation",
+      "orcid": "0000-0002-3780-1739"
+    },
+    {
+      "name": "Fram, Jonathan",
+      "type": "Other",
+      "affiliation": "Oregon State University",
+      "orcid": "0000-0002-9937-6272"
+    },
+    {
+      "name": "Cervantes, Brandy",
+      "type": "Other",
+      "affiliation": "Oregon State University",
+      "orcid": "0000-0001-7927-9195"
+    },
+    {
+      "name": "Hewett, Kate",
+      "type": "Other",
+      "affiliation": "University of Washington"
+    }
+  ],
+  "communities": [{"identifier": "nsf-ooi"}],
+  "grants": [{"id": "10.13039/100000001::2244833"}]
+}

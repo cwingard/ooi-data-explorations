@@ -73,9 +73,9 @@ try:
     nrc = netrc.netrc()
     AUTH = nrc.authenticators('ooinet.oceanobservatories.org')
     if AUTH is None:
-        raise RuntimeError('No entry found for machine ``ooinet.oceanobservatories.org`` in the .netrc file')
+        warnings.warn('Not entry found for machine ``ooinet.oceanobservatories.org`` in the .netrc file. M2M queries will not work without appropriate authorization.')
 except FileNotFoundError as e:
-    raise OSError(e, os.strerror(e.errno), os.path.expanduser('~'))
+    warnings.warn('NetRC file ({}/.netrc) not found. M2M queries will not work without appropriate authorization.'.format(os.path.expanduser('~')))
 
 # set up a default location to save the data
 home = os.path.expanduser('~')
@@ -123,20 +123,40 @@ def convert_time(ms):
     else:
         return datetime.fromtimestamp(ms / 1000)
 
+def validate_request(r):
+    """
+    Test the API request to see if it was successful. If the OOI M2M API is
+    down for maintenance, the request will return a 200 status code, but the
+    content will not be valid JSON. This function checks for that and raises
+    an exception if the request was not successful.
+
+    :param r: requests.Response object from the API request
+    :return: JSON data if the request was successful, otherwise None
+    """
+    if r.status_code != requests.codes.ok:
+        raise requests.exceptions.HTTPError(f"Request failed with status code {r.status_code}")
+
+    try:
+        data = r.json()
+    except requests.exceptions.JSONDecodeError:
+        # If the response is not valid JSON, the API is most likely down for maintenance
+        warnings.warn("The OOI M2M API is currently unavailable. Please try again later.")
+        return None
+
+    return data
 
 # Sensor Information
 def list_sites():
     """
-    Returns a list of all the available sites in the system. The list can then be used to either iterate over the sites
-    programmatically or inform the user of the available sites and their codes.
+    Returns a list of all the available sites in the system. The list can then
+    be used to either iterate over the sites programmatically or inform the
+    user of the available sites and their codes.
 
     :return: list of all available sites in the system
     """
     r = SESSION.get(BASE_URL + SENSOR_URL, auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 def list_nodes(site):
@@ -147,10 +167,8 @@ def list_nodes(site):
     :return: List of the available nodes for this site
     """
     r = SESSION.get(BASE_URL + DEPLOY_URL + site, auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 def list_sensors(site, node):
@@ -162,130 +180,122 @@ def list_sensors(site, node):
     :return: list of the available sensors for this site and node
     """
     r = SESSION.get(BASE_URL + DEPLOY_URL + site + '/' + node, auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 def list_methods(site, node, sensor):
     """
-    Based on the site, node and sensor name, list the data delivery methods that are available.
+    Based on the site, node and sensor name, list the data delivery methods
+    that are available.
 
     :param site: Site name to query
     :param node: Node name to query
     :param sensor: Sensor name to query
-    :return: list of the data delivery methods associated with this site, node and sensor
+    :return: list of the data delivery methods associated with this site,
+        node and sensor
     """
     r = SESSION.get(BASE_URL + SENSOR_URL + site + '/' +
                     node + '/' + sensor, auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 def list_streams(site, node, sensor, method):
     """
-    Based on the site, node and sensor name and the data delivery method, list the data streams that are available.
+    Based on the site, node and sensor name and the data delivery method, list
+    the data streams that are available.
 
     :param site: Site name to query
     :param node: Node name to query
     :param sensor: Sensor name to query
     :param method: Data delivery method to query
-    :return: list of the data streams associated with this site, node, sensor and data delivery method
+    :return: list of the data streams associated with this site, node, sensor
+        and data delivery method
     """
     # Determine the streams associated with the delivery method available for this sensor
     r = SESSION.get(BASE_URL + SENSOR_URL + site + '/' + node + '/' +
                     sensor + '/' + method, auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 def list_metadata(site, node, sensor):
     """
-    Based on the site, node and sensor names, return a metadata dictionary with the times and parameters available
-    for a sensor.
+    Based on the site, node and sensor names, return a metadata dictionary with
+    the times and parameters available for a sensor.
 
     :param site: Site name to query
     :param node: Node name to query
     :param sensor: Sensor name to query
-    :return: dictionary with the parameters and available time ranges available for the sensor
+    :return: dictionary with the parameters and available time ranges available
+        for the sensor
     """
     r = SESSION.get(BASE_URL + SENSOR_URL + site + '/' + node + '/' +
                     sensor + '/metadata', auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 # Preload Information
 def get_parameter_information(parameter_id):
     """
-    Use the Parameter ID# to retrieve information about the parameter: units, sources, data product ID, comments,etc.
+    Use the Parameter ID# to retrieve information about the parameter: units,
+    sources, data product ID, comments,etc.
 
     :param parameter_id: Parameter ID# of interest
     :return: json object with information on the parameter of interest
     """
     r = SESSION.get(BASE_URL + PARAMETER_URL + parameter_id, auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 def get_stream_information(stream):
     """
-    Use the stream name to retrieve information about the stream contents: parameters, units, sources, etc.
+    Use the stream name to retrieve information about the stream contents:
+    parameters, units, sources, etc.
 
     :param stream: Stream name of interest
     :return: json object with information on the contents of the stream
     """
     r = SESSION.get(BASE_URL + STREAM_URL + stream, auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 # Asset Information
 def get_asset_by_uid(uid):
     """
-    Returns all asset information for a given unique asset identifier or
+    Returns all asset information for a given unique asset identifier or asset
     UID. Results are interchangeable with get_asset_by_asset_id.
 
     :param uid: unique asset identifier (UID), e.g. CGINS-DOSTAD-00134
     :return: asset information for the identified UID
     """
     r = SESSION.get(BASE_URL + ASSET_URL + '?uid=' + uid, auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 def get_asset_by_asset_id(asset_id):
     """
-    Returns all asset information for a given OOI asset identifier or
-    assetId. Results are interchangeable with get_asset_by_uid.
+    Returns all asset information for a given OOI asset identifier or asset ID.
+    Results are interchangeable with get_asset_by_uid.
 
     :param asset_id: OOI asset identifier (assetId), e.g. 1352
     :return: asset information for the identified assetId
     """
     r = SESSION.get(BASE_URL + ASSET_URL + '/' + str(asset_id), auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 # Deployment Information
 def list_deployments(site, node, sensor):
     """
-    Based on the site, node and sensor name, list the deployment numbers that are available.
+    Based on the site, node and sensor name, list the deployment numbers that
+    are available.
 
     :param site: Site name to query
     :param node: Node name to query
@@ -294,51 +304,48 @@ def list_deployments(site, node, sensor):
     """
     r = SESSION.get(BASE_URL + DEPLOY_URL + site + '/' +
                     node + '/' + sensor, auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 def get_sensor_information(site, node, sensor, deploy):
     """
-    Uses the metadata information available from the system for an instrument deployment to obtain the asset and
-    calibration information for the specified sensor and deployment. This information is part of the sensor
+    Uses the metadata information available from the system for an instrument
+    deployment to obtain the asset and calibration information for the
+    specified sensor and deployment. This information is part of the sensor
     metadata specific to that deployment.
 
     :param site: Site name to query
     :param node: Node name to query
     :param sensor: Sensor name to query
     :param deploy: Deployment number
-    :return: json object with the site-node-sensor-deployment specific sensor metadata
+    :return: json object with the site-node-sensor-deployment specific sensor
+        metadata
     """
     r = SESSION.get(BASE_URL + DEPLOY_URL + site + '/' + node + '/' + sensor + '/' + str(deploy),
                     auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 def get_sensor_history(uid):
     """
-    Obtain the asset and calibration information for all deployments for the specified unique asset identifier (UID).
+    Obtain the asset and calibration information for all deployments for the
+    specified unique asset identifier (UID).
 
     :param uid: unique asset identifier (UID)
     :return: json object with the asset and calibration information
     """
     r = SESSION.get(BASE_URL + ASSET_URL + '/deployments/' +
                     uid + '?editphase=ALL', auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 def get_deployment_dates(site, node, sensor, deploy):
     """
-    Based on the site, node and sensor names and the deployment number, determine the start and end times for a
-    deployment.
+    Based on the site, node and sensor names and the deployment number,
+    determine the start and end times for a deployment.
 
     :param site: Site name to query
     :param node: Node name to query
@@ -379,11 +386,12 @@ def get_calibrations_by_uid(uid, to_dataframe=False):
     :return: calibration information for the identified UID
     """
     r = SESSION.get(BASE_URL + ASSET_URL + '/cal?uid=' + uid, auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
+    data = validate_request(r)
+    if data:
         if not to_dataframe:
-            return r.json()
+            return data
         else:
-            calInfo = r.json()
+            calInfo = data
             # Convert the json object to a pandas dataframe
             calibrations = None
             for c in calInfo["calibration"]:
@@ -415,10 +423,8 @@ def get_calibrations_by_asset_id(asset_id):
     :return: calibration information for the identified assetId
     """
     r = SESSION.get(BASE_URL + ASSET_URL + '/cal?assetid=' + str(asset_id), auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 def get_calibrations_by_refdes(site, node, sensor, start=None, stop=None, to_dataframe=False):
@@ -450,12 +456,13 @@ def get_calibrations_by_refdes(site, node, sensor, start=None, stop=None, to_dat
         raise InputError(
             'You must specify both start and stop time, or leave both of those fields empty.')
 
-    if r.status_code == requests.codes.ok:
+    data = validate_request(r)
+    if data:
         if not to_dataframe:
             return r.json()
         else:
             # Convert to a dataframe and return the dataframe
-            calInfo = r.json()
+            calInfo = data
             calibrations = None
             for cal in calInfo:
                 deploy_num = cal["deploymentNumber"]
@@ -496,10 +503,8 @@ def get_annotations(site, node, sensor):
     """
     r = SESSION.get(BASE_URL + ANNO_URL + 'find?beginDT=0&refdes=' + site + '-'
                     + node + '-' + sensor, auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
 def add_annotation_qc_flags(ds, annotations):
@@ -522,14 +527,14 @@ def add_annotation_qc_flags(ds, annotations):
 
     # Convert the flags to QARTOD flags
     codes = {
-        None: 0,
+        None: 0,  # No flag set, this is used for notes or other non-QC annotations
         'pass': 1,
         'not_evaluated': 2,
         'suspect': 3,
         'fail': 4,
-        'not_operational': 0,
-        'not_available': 0,
-        'pending_ingest': 0
+        'not_operational': 9,
+        'not_available': 9,
+        'pending_ingest': 9
     }
     annotations['qcFlag'] = annotations['qcFlag'].map(codes).astype('category')
 
@@ -538,8 +543,7 @@ def add_annotation_qc_flags(ds, annotations):
     stream_mask = annotations["stream"].apply(lambda x: True if x == stream or x is None else False)
     annotations = annotations[stream_mask]
 
-    # Explode the annotations so each parameter is hit for each
-    # annotation
+    # Explode the annotations so each parameter is hit for each annotation
     annotations = annotations.explode(column="parameters")
 
     # Get the unique parameters and their associated variable name
@@ -568,8 +572,8 @@ def add_annotation_qc_flags(ds, annotations):
 
         pid_annos = pid_annos.sort_values(by="qcFlag")
 
-        # Create an array of flags to begin setting the qc-values
-        pid_flags = pd.Series(np.zeros(ds.time.values.shape), index=ds.time.values)
+        # Create an array of flags to begin setting the qc-values (set to pass by default)
+        pid_flags = pd.Series(np.ones(ds.time.values.shape), index=ds.time.values)
 
         # For each index, set the qcFlag for each respective time period
         for ind in pid_annos.index:
@@ -615,8 +619,8 @@ def add_annotation_qc_flags(ds, annotations):
         attrs = {
             "comment": comment,
             "long_name": long_name,
-            "flag_values": np.array([1, 2, 3, 4, 9]),
-            "flag_meanings": "pass not_evaluated suspect_or_of_high_interest fail missing_data"
+            "flag_values": np.array([0, 1, 2, 3, 4, 9]),
+            "flag_meanings": "note_or_comment pass not_evaluated suspect_or_of_high_interest fail missing_data"
         }
 
         # Now add to the dataset
@@ -628,7 +632,8 @@ def add_annotation_qc_flags(ds, annotations):
 
 def get_vocabulary(site, node, sensor):
     """
-    Based on the site, node and sensor name download the vocabulary record defining this sensor.
+    Based on the site, node and sensor name download the vocabulary record
+    defining this sensor.
 
     :param site: Site name to query
     :param node: Node name to query
@@ -637,30 +642,11 @@ def get_vocabulary(site, node, sensor):
     """
     r = SESSION.get(BASE_URL + VOCAB_URL + site + '/' + node +
                     '/' + sensor, auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        return r.json()
-    else:
-        return None
+    data = validate_request(r)
+    return data
 
 
-# Requesting and compiling data via synchronous and asynchronous requests
-#def m2m_sync(site, node, sensor, method, stream, start=None, stop=None, parameters=None):
-#    """
-#    TODO
-#
-#    :param site:
-#    :param node:
-#    :param sensor:
-#    :param method:
-#    :param stream:
-#    :param start:
-#    :param stop:
-#    :param parameters:
-#    :return:
-#    """
-#    pass
-
-
+# Requesting and compiling data via asynchronous requests
 def m2m_request(site, node, sensor, method, stream, start=None, stop=None):
     """
     Request data from OOINet for a particular instrument (as defined by the
@@ -698,10 +684,9 @@ def m2m_request(site, node, sensor, method, stream, start=None, stop=None):
     options = begin_date + end_date + '&format=application/netcdf&email=None'
     r = SESSION.get(BASE_URL + SENSOR_URL + site + '/' + node + '/' + sensor + '/' + method + '/' + stream + options,
                     auth=(AUTH[0], AUTH[2]))
-    if r.status_code == requests.codes.ok:
-        data = r.json()
-    else:
-        return None
+    data = validate_request(r)
+    if not data:  # if the request was not successful, return None
+        return data
 
     # wait until the request is completed
     print('Requesting:\n\trefdes: {}-{}-{}\n\tmethod: {}\n\tstream: {}\n\tfrom {} to {}'.format(site, node,
@@ -743,6 +728,7 @@ def m2m_collect(data, tag='.*\\.nc$', use_dask=False):
     # Create a list of the files from the request above using a simple regex as a tag to discriminate the files
     url = [url for url in data['allURLs'] if re.match(r'.*thredds.*', url)][0]
     files = list_files(url, tag)
+    frames = []
 
     # Process the data files found above and concatenate into a single data set
     print('Downloading %d data file(s) from the user''s OOI M2M THREDDS catalog' % len(files))
@@ -819,6 +805,7 @@ def gc_collect(dataset_id, tag='.*\\.nc$', use_dask=False):
 
     # Create a list of the files from the request above using a simple regex as a tag to discriminate the files
     files = list_files(url, tag)
+    frames = []
 
     # Process the data files found above and concatenate them into a single list
     print('Downloading %d data file(s) from the OOI Gold Copy THREDSS catalog' % len(files))
@@ -837,7 +824,7 @@ def gc_collect(dataset_id, tag='.*\\.nc$', use_dask=False):
     if not frames:
         message = "No data files were downloaded from the Gold Copy THREDDS server."
         warnings.warn(message)
-        return None
+        return xr.Dataset  # Return an empty dataset if no files were found
 
     # merge the data frames into a single data set
     print('Merging the data files into a single dataset')
@@ -895,6 +882,22 @@ def kdata_collect(dataset_id, tag='*.nc', use_dask=False):
 
     # Create a list of the files from the request above using a simple regex as a tag to discriminate the files
     files = glob.glob(kdata + '/' + tag)
+    frames = []
+
+    # Process the data files found above and concatenate them into a single list
+    print('Downloading %d data file(s) from the local kdata directory' % len(files))
+    return kdata_collect_from_file_list(files, use_dask)
+
+def kdata_collect_from_file_list(files, use_dask=False):
+    """
+    Collect data from the OOI JupyterHub kdata directory. 
+    The collected data is gathered into a xarray dataset for further processing.
+
+    :param files: list of files in kdata directory
+    :param use_dask: Boolean flag indicating whether to load the data using
+        dask arrays (default=False)
+    :return gc: the collected Gold Copy data as a xarray dataset
+    """
 
     # Process the data files found above and concatenate them into a single list
     print('Downloading %d data file(s) from the local kdata directory' % len(files))
@@ -1001,7 +1004,7 @@ def process_file(catalog_file, gc=None, use_dask=False):
     # since the CF decoding of the time is failing, explicitly reset all instances where the units are
     # seconds since 1900-01-01 to the correct CF units and convert the values to datetime64[ns] types
     time_pattern = re.compile(r'^seconds since 1900-01-01.*$')
-    ntp_date = np.datetime64('1900-01-01')
+    ntp_date = pd.to_datetime('1900-01-01')
     for v in ds.variables:
         if 'units' in ds[v].attrs.keys():
             if isinstance(ds[v].attrs['units'], str):  # because some units use non-standard characters...
@@ -1009,8 +1012,8 @@ def process_file(catalog_file, gc=None, use_dask=False):
                     del (ds[v].attrs['_FillValue'])  # no fill values for time!
                     del (ds[v].attrs['units'])       # time units are set via the encoding
                     ds[v].encoding = {'_FillValue': None, 'units': 'seconds since 1900-01-01T00:00:00.000Z'}
-                    np_time = ntp_date + (ds[v] * 1e9).astype('timedelta64[ns]')  # type: ignore
-                    ds[v] = np_time
+                    np_time = [ntp_date + pd.to_timedelta(i, 's') for i in ds[v].values]
+                    ds[v] = ('time', np_time)
 
     # sort by time
     ds = ds.sortby('time')
@@ -1203,7 +1206,8 @@ def update_dataset(ds, depth):
         }
     })
     for v in geo_coords.variables:
-        geo_coords[v].attrs = geo_attrs[v]  # type: ignore
+        # noinspection PyTypeChecker
+        geo_coords[v].attrs = geo_attrs[v]
 
     # merge the geospatial coordinates into the data set
     ds = ds.merge(geo_coords)
@@ -1296,8 +1300,9 @@ def update_dataset(ds, depth):
 
 def dt64_epoch(dt64):
     """
-    Convert a panda or xarray date/time value represented as a datetime64 object (nanoseconds since 1970) to a float,
-    representing an epoch time stamp (seconds since 1970-01-01).
+    Convert a panda or xarray date/time value represented as a datetime64
+    object (nanoseconds since 1970) to a float, representing an epoch time
+    stamp (seconds since 1970-01-01).
 
     :param dt64: panda or xarray datatime64 object
     :return epts: epoch time as seconds since 1970-01-01
@@ -1310,8 +1315,8 @@ def dict_update(source, overrides):
     """
     Update a nested dictionary or similar mapping. Modifies ``source`` in place.
 
-    From https://stackoverflow.com/a/30655448. Replaces original dict_update used by poceans-core, also pulled from
-    the same thread.
+    From https://stackoverflow.com/a/30655448. Replaces original dict_update
+    used by poceans-core, which also pulled from the same thread.
     """
     for key, value in overrides.items():
         if isinstance(value, Mapping) and value:

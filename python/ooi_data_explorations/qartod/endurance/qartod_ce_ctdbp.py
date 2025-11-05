@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 @author Christopher Wingard
-@brief Load the PRESF data from the uncabled, Coastal Endurance Surface
+@brief Load the CTDBP data from the uncabled, Coastal Endurance Surface
     Moorings and processes the data to generate QARTOD Gross Range and
     Climatology test limits
 """
@@ -46,8 +46,8 @@ def combine_delivery_methods(site, node, sensor):
     rinst = load_gc_thredds(site, node, sensor, 'recovered_inst', 'ctdbp_cdef_instrument_recovered', tag)
     rinst = ctdbp_instrument(rinst)
 
-    # combine the three datasets into a single, merged time series resampled to a 3-hour interval time series
-    merged = combine_datasets(telem, rhost, rinst, 180)
+    # combine the three datasets into a single, merged time series resampled to an hourly time series
+    merged = combine_datasets(telem, rhost, rinst, 60)
 
     return merged
 
@@ -107,9 +107,11 @@ def generate_qartod(site, node, sensor, cut_off):
         src_date = cut.strftime('%Y-%m-%d')
 
     data = data.sel(time=slice('2014-01-01T00:00:00', end_date))
+    start_date = str(data.time[0].values.min())[:10]
 
     # set the parameters and the sensor range limits
-    parameters = ['seawater_conductivity', 'seawater_temperature', 'seawater_pressure', 'practical_salinity']
+    parameters = ['sea_water_electrical_conductivity', 'sea_water_temperature',
+                  'sea_water_pressure', 'sea_water_practical_salinity']
 
     if site == 'CE09OSSM' and node == 'MFD37':
         plimit = [0, 600]   # 600 m stain gauge pressure sensor
@@ -118,8 +120,8 @@ def generate_qartod(site, node, sensor, cut_off):
 
     limits = [[0, 9], [-5, 35], plimit, [0, 42]]
 
-    # create the initial gross range entry
-    gr_lookup = process_gross_range(data, parameters, limits, site=site, node=node, sensor=sensor)
+    # create the initial gross range entry (lookup) table for the data using expanded gross range limits
+    gr_lookup = process_gross_range(data, parameters, limits, expanded=True, site=site, node=node, sensor=sensor)
 
     # replicate it three times for the different streams
     gr_lookup = pd.concat([gr_lookup] * 3, ignore_index=True)
@@ -139,12 +141,11 @@ def generate_qartod(site, node, sensor, cut_off):
         idx += 4
 
     # set the default source string
-    gr_lookup['source'] = ('Sensor min/max based on the vendor sensor specifications. '
-                           'The user min/max is the historical mean of all data collected '
-                           'up to {} +/- 3 standard deviations.'.format(src_date))
+    gr_lookup['source'] = ('User Gross Range based on data collected from {} through to {}.'.format(start_date,
+                                                                                                    src_date))
 
     # create the initial climatology lookup and tables for the data
-    clm_lookup, clm_table = process_climatology(data, parameters[1:4:2], limits[1:4:2],
+    clm_lookup, clm_table = process_climatology(data, parameters[1:4:2], limits[1:4:2], expanded=True,
                                                 site=site, node=node, sensor=sensor)
 
     # replicate the climatology lookup table three times for the different streams

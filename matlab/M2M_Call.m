@@ -31,7 +31,14 @@ function [nclist] = M2M_Call(uframe_dataset_name,start_date,end_date,options)
 %    ['Basic ' matlab.net.base64encode([api_key ':' api_token])]}, 'Timeout', 120);
 %
 m2m_url = "https://ooinet.oceanobservatories.org/api/m2m/12576/sensor/inv/";
-data_url = strcat(m2m_url, uframe_dataset_name);
+% Check type of uframe_dataset_name; when it comes in as a char array, must be converted to string
+if isa(uframe_dataset_name, "char")
+    dataset_name = string(uframe_dataset_name);
+else
+    dataset_name = uframe_dataset_name;
+end
+
+data_url = strcat(m2m_url, dataset_name);
 data_options = "?beginDT=" + start_date + "&endDT=" + end_date + "&format=application/netcdf&email=None";
 
 %.. Make M2M Call(s)
@@ -63,8 +70,14 @@ for jj = 1:length(data_url)
         %.. while the data collected are identical, the data formats are not,
         %.. requiring different streams that were applicable at different
         %.. times).
+        if strcmp(ME.identifier, 'MATLAB:webservices:HTTP401StatusCodeError')
+            response_status{jj}  = ['ERROR: ' ...
+            'UFrame credentials error. Request unauthorized: ' ...
+            ME.identifier];
+            error(['uframe_m2m_status: ' response_status{jj}]);
+        end
         response_status{jj} = ['WARNING: ' ...
-            'No UFrame data found for datastream ' uframe_dataset_name{jj}];
+            'No UFrame data found for datastream ' dataset_name{jj}];
         disp(['uframe_m2m_status: ' response_status{jj}]);
         disp(' ');
         continue
@@ -91,7 +104,7 @@ for jj = 1:length(data_url)
     disp(['uframe_m2m_status: ' response_status{jj}]);
     if ~strcmp(response_status, 'request complete')
         disp(' ');
-        error(['***WARNING: ' uframe_dataset_name{jj} ' NEEDS TO BE RE-RUN***']);
+        error(['***WARNING: ' dataset_name{jj} ' NEEDS TO BE RE-RUN***']);
     end
     
     % now put together the list of available NetCDF files from the THREDDS server
@@ -119,7 +132,7 @@ for jj = 1:length(data_url)
     
     %.. prune the list of mapped files to our instrument of interest by eliminating
     %.. files associated with other instruments used to calculate data products
-    strings_to_match = sprintf('.*/deployment.*%s.*\\.nc$', strrep(uframe_dataset_name{jj}, '/', '-'));
+    strings_to_match = sprintf('.*/deployment.*%s.*\\.nc$', strrep(dataset_name{jj}, '/', '-'));
     nc_all = cellfun(@(x) regexp(x, strings_to_match, 'match'), nc_all, 'UniformOutput', 0);
     nc_all(cellfun('isempty', nc_all)) = [];  % cell elements are themselves cells
     nclist{jj} = string(nc_all(:));  % string array

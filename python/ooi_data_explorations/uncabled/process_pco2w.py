@@ -195,7 +195,7 @@ def quality_checks(ds):
     qc_flag[m] = 3
 
     # test for suspect pC02 values -- data falls outside the vendor calibration range
-    m = (ds.pco2_seawater < 200) | (ds.pco2_seawater > 2000)
+    m = (ds.pco2_seawater < 50) | (ds.pco2_seawater > 2500)
     qc_flag[m] = 3
 
     # test for failed signal levels -- values based on limits used with the SAMI-pH data
@@ -204,7 +204,7 @@ def quality_checks(ds):
     qc_flag[m] = 4
 
     # test for clearly failed pCO2 values -- data is 2x above or below the suspect upper and lower limits
-    m = (ds.pco2_seawater < 100) | (ds.pco2_seawater > 4000) | (np.isnan(ds.pco2_seawater))
+    m = (ds.pco2_seawater < 25) | (ds.pco2_seawater > 4000) | (np.isnan(ds.pco2_seawater))
     qc_flag[m] = 4
 
     # test for failed absorbance blank ratio values (less than 20% of full scale)
@@ -485,7 +485,7 @@ def main(argv=None):
         os.makedirs(os.path.dirname(out_file))
 
     pco2w.to_netcdf(out_file, mode='w', format='NETCDF4', engine='h5netcdf', encoding=ENCODINGS)
-
+    return None
 
 if __name__ == '__main__':
     main()

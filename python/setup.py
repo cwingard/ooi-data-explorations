@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from os import path
-from setuptools import setup, find_packages
+
+from setuptools import find_packages, setup
 
 # read the contents of the README file
 this_directory = path.abspath(path.dirname(__file__))
@@ -11,7 +12,7 @@ with open(path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 
 setup(
     name = 'ooi_data_explorations',
-    version = '0.0.1',
+    version = '0.2.3',
     description = (
         'Collection of python processing modules for requesting data '
         'from the OOI M2M system'
@@ -37,7 +38,7 @@ setup(
     license = 'MIT',
     packages = find_packages(),
     install_requires = [
-        'xarray',
+        'xarray[accel]',
         'dask',
         'munch',
         'tqdm',
@@ -47,7 +48,11 @@ setup(
         'gsw',
         'requests',
         'beautifulsoup4',
-        'PyYAML'
+        'PyYAML',
+        'matplotlib',
+        'ntplib',
+        'netcdf4',
+        'h5netcdf',
     ],
     include_package_data=True,
     zip_safe=False

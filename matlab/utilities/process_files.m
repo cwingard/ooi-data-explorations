@@ -108,7 +108,7 @@ if nframes > 1
                 m = ~ismember(frames{i-1}.Properties.VariableNames, frames{i}.Properties.VariableNames);
                 varnames = frames{i-1}.Properties.VariableNames(m);
                 t = frames{i};
-                for j = numel(varnames)
+                for j = 1:numel(varnames)
                     t = addvars(t, repmat(convertTo(t.Time, "datenum"), 1, 1) .* -inf, 'NewVariableNames', varnames{j});
                 end %for
                 frames{i} = t;
@@ -116,7 +116,7 @@ if nframes > 1
                 m = ~ismember(frames{i}.Properties.VariableNames, frames{i-1}.Properties.VariableNames);
                 varnames = frames{i}.Properties.VariableNames(m);
                 t = frames{i-1};
-                for j = numel(varnames)
+                for j = 1:numel(varnames)
                     t = addvars(t, repmat(convertTo(t.Time, "datenum"), 1, 1) .* -inf, 'NewVariableNames', varnames{j});
                 end %for
                 frames{i-1} = t;

@@ -116,3 +116,5 @@ venv.bak/
 # Custom
 *.jpg
 *.mp4
+
+*_build/*

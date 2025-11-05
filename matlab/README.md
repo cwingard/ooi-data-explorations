@@ -2,9 +2,15 @@
 
 ## Installation
 
-Download the main [ooi-data-explorations repository] as a ZIP.
-Extract the ZIP folder so that the matlab subfolder is available.
-Rename this folder to something unique to prevent possible confusion with other toolboxes (e.g. ooi_m2m).
+Download the main [ooi-data-explorations repository](https://github.com/oceanobservatories/ooi-data-explorations/archive/refs/heads/master.zip) as a ZIP, 
+extract the ZIP file, and navigate to the matlab sub directory.
+Rename this director to something unique to prevent possible confusion with other toolboxes (e.g. ooi_m2m).
+
+Alternatively, clone this repository with `git` and navigate to the `matlab` subdirectory to see the available MATLAB functions and examples:
+```shell
+git clone https://github.com/oceanobservatories/ooi-data-explorations.git
+cd ooi-data-explorations/matlab
+```
 
 ### Windows
 1. Navigate to C:\Program Files\MATLAB\RYYYYY\toolbox. 
@@ -86,10 +92,10 @@ token = 'OOI-API-TOKEN-HERE'
 options = weboptions('CertificateFilename','','HeaderFields',{'Authorization',...
     ['Basic ' matlab.net.base64encode([user ':' token])]}, 'Timeout', 120);
 
-start = '2019-05-01T00:00:00.000Z'; 
-end = '2019-08-31T23:59:59.999Z';
+start_time = '2019-05-01T00:00:00.000Z'; 
+end_time = '2019-08-31T23:59:59.999Z';
 
-ce01issm_nc = M2M_Call(ce01issm_mfn,start,end,options);  
+ce01issm_nc = M2M_Call(ce01issm_mfn,start_time,end_time,options);  
 ```
 
 #### M2M_Data

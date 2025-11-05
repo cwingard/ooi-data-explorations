@@ -1,0 +1,115 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+
+[project]
+authors = [
+    {name="Christopher Wingard", email="chris.wingard@oregonstate.edu"},
+    {name="Andrew Reed", email="areed@whoi.edu"},
+    {name="Joffrey Peters", email="joffreyp@gmail.com"},
+]
+maintainers = [
+    {name="Christopher Wingard", email="chris.wingard@oregonstate.edu"},
+    {name="Andrew Reed", email="areed@whoi.edu"},
+    {name="Joffrey Peters", email="joffreyp@gmail.com"},
+]
+dynamic=["version"]
+name = "ooi_data_explorations"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE.txt"]
+description = "Tools for interacting with OOI data, including downloading, cleaning, and visualizing."
+keywords = ["URL parameters", "Ocean Observatories Initiative", "jupyter_server"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Jupyter",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.9"
+dependencies = [
+        'xarray[accel]',
+        'dask',
+        'munch',
+        'tqdm',
+        'urllib3',
+        'numpy',
+        'pandas',
+        'gsw',
+        'requests',
+        'beautifulsoup4',
+        'PyYAML',
+        'matplotlib',
+        'ntplib',
+        'netcdf4',
+        'h5netcdf',
+]
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "ruff",
+    "build",
+    "hatch",
+    "ipykernel",
+    "requests",
+]
+
+[tool.hatch.version]
+path = "version.py"
+
+[tool.hatch.build]
+include = [
+  "ooi_data_explorations",
+  "examples",
+  "**/*.py",  
+]
+exclude = [
+  "**/__pycache__",
+    "**/*.pyc",
+  "tests",
+  "conda-recipe",
+  "venv",
+  "utilities",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "ooi_data_explorations.version.__version__"}
+
+
+[tool.ruff]
+line-length = 88
+indent-width = 4
+
+[tool.ruff.lint]
+#ignore = ["ARG", "TRY", "RUF012", "TID252", "G", "INP001", "E402", "F401", "BLE001"]
+extend-select = [
+    "E",  # pycodestyle
+    "B",  # flake8-bugbear
+    "I",  # isort
+    "UP",  # pyupgrade
+    "G001", # no % or f formatting in logs, prevents sttructured logging
+]
+
+[tool.ruff.format]
+
+# Enforce double quotes for strings, following Black's style.
+quote-style = "double"
+
+# Use spaces for indentation, in line with Black's formatting style.
+indent-style = "space"
+
+# Keep magic trailing commas, a feature of Black's formatting.
+skip-magic-trailing-comma = false
+
+# Automatically detect and use the appropriate line ending style.
+line-ending = "auto"

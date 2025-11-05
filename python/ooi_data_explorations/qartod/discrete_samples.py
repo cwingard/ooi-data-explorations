@@ -23,10 +23,11 @@ def get_sites(url):
     :param url: OOI Alfresco WebDAV server URL
     :return sites: list of BeautifulSoup tags containing the array names
     """
-    r = requests.get(url, auth=('guest', 'guest'))
+    r = requests.get(url)
     if r.status_code == requests.codes.ok:
         soup = BeautifulSoup(r.text, 'html.parser')
-        sites = soup.find_all('a', {'href': re.compile(r'^/alfresco/webdav/OOI/Cabled|Coastal|Global')})
+        sites = soup.find_all('a', {'href': re.compile(
+            r'^Argentine|Cabled|Endurance|Irminger|Pioneer|Southern|Station')})
         return sites
     else:
         return None
@@ -57,17 +58,22 @@ def get_cruises(url, sites, site_name, cruise=None):
 
     # create the URL for the site and search for the list of cruises
     a = re.findall(r'<a href=\"(.+?)\">', str(site))[0]
-    site_url = url + a + '/Cruise%20Data/'
-    r = requests.get(site_url, auth=('guest', 'guest'))
+    site_url = url + a
+    r = requests.get(site_url)
     if r.status_code == requests.codes.ok:
         soup = BeautifulSoup(r.text, 'html.parser')
         if cruise:
             if isinstance(cruise, list):
-                cruises = [soup.find_all('a', {'href': re.compile('/Cruise%20Data/.*?' + c + '.+?')})[0] for c in cruise]
+                cruises = [soup.find_all('a', {'href': re.compile('.*' + c + '.+?')})[0]
+                           for c in cruise]
             else:
-                cruises = soup.find_all('a', {'href': re.compile('/Cruise%20Data/.*?' + cruise + '.+?')})
+                cruises = soup.find_all('a', {'href': re.compile('.*' + cruise + '.+?')})
         else:
-            cruises = soup.find_all('a', {'href': re.compile(a + '/Cruise%20Data/')})
+            if 'Pioneer' in site_name:
+                # the Pioneer array is split into two sites, but the cruise names are not
+                cruises = soup.find_all('a', {'href': re.compile('Pioneer')})
+            else:
+                cruises = soup.find_all('a', {'href': re.compile(site_name)})
 
         return cruises
     else:
@@ -77,18 +83,35 @@ def get_cruises(url, sites, site_name, cruise=None):
 def get_discrete_samples(site_name, cruise=None):
     """
     Get the discrete sample data for a specific array and cruise from the OOI
-    Alfresco WebDAV server. The data is returned as a pandas DataFrame.
+    Raw Data server. The data is returned as a pandas DataFrame.
 
     :param site_name: name of the array to search for
     :param cruise: optional, name of the cruise(s) to search for (can be
         either a single name or a list of names)
     :return samples: pandas DataFrame containing the discrete sample data
     """
-    # base URL for the OOI Alfresco server
-    base_url = 'https://alfresco.oceanobservatories.org'
+    # check that the site name is a valid string
+    if not isinstance(site_name, str) or not site_name:
+        raise ValueError("site_name must be a non-empty string")
+
+    # check that the site name is a valid OOI array name
+    valid_sites = ['Argentine_Basin', 'Cabled', 'Endurance', 'Irminger_Sea', 'Pioneer-MAB',
+                   'Pioneer-NES', 'Southern_Ocean', 'Station_Papa']
+    if site_name not in valid_sites:
+        raise ValueError(f"site_name must be one of {valid_sites}")
+
+    # check that the cruise is a valid string or list of strings
+    if cruise is not None:
+        if isinstance(cruise, str):
+            cruise = [cruise]
+        elif not isinstance(cruise, list) or not all(isinstance(c, str) for c in cruise):
+            raise ValueError("cruise must be a string or a list of strings")
+
+    # base URL for the OOI Raw Data server where the discrete sample data is stored
+    base_url = 'https://rawdata.oceanobservatories.org/files/cruise_data/'
 
     # create a listing of the array names in the WebDAV directory
-    sites = get_sites(base_url + '/alfresco/webdav/OOI/')
+    sites = get_sites(base_url)
 
     # use the site name to find the URLs for the different cruises at that site
     cruises = get_cruises(base_url, sites, site_name, cruise)
@@ -100,20 +123,12 @@ def get_discrete_samples(site_name, cruise=None):
     # download the data into a pandas DataFrame
     samples = []
     for sample in cruises:
-        # create the URL for the cruise discrete sample data directory (some cruises have the data
-        # in a slightly different directory)
-        sample_url1 = base_url + re.findall(r'<a href=\"(.+?)\">', str(sample))[0] + '/Ship_Data/Water%20Sampling/'
-        sample_url2 = base_url + re.findall(r'<a href=\"(.+?)\">', str(sample))[0] + '/Ship%20Data/Water%20Sampling/'
+        # create the URL for the cruise discrete sample data directory
+        sample_url = base_url + site_name + '/' +re.findall(r'<a href=\"(.+?)\">', str(sample))[0] + 'Water_Sampling/'
 
-        # search for the discrete sample data files using the two different URLs (note, not all cruises
-        # have discrete sample data files)
-        r1 = requests.get(sample_url1, auth=('guest', 'guest'))
-        r2 = requests.get(sample_url2, auth=('guest', 'guest'))
-        if r1.status_code == requests.codes.ok:
-            r = r1
-        elif r2.status_code == requests.codes.ok:
-            r = r2
-        else:
+        # search for the discrete sample data files (note, not all cruises have discrete sample data files)
+        r = requests.get(sample_url)
+        if r.status_code != requests.codes.ok:
             continue
 
         # find the CSV file for the discrete sample data and create the URL to download the file
@@ -123,13 +138,14 @@ def get_discrete_samples(site_name, cruise=None):
             continue
         else:
             csv = csv[0]
-        csv_url = base_url + re.findall(r'<a href=\"(.+?)\">', str(csv))[0]
+        csv_url = sample_url + re.findall(r'<a href=\"(.+?)\">', str(csv))[0]
 
         # download the CSV file and read it into a pandas DataFrame appending it to the list of discrete
         # sample data files from the different cruises, if any
-        r = requests.get(csv_url, auth=('guest', 'guest'))
-        times = ['Start Time [UTC]', 'CTD Bottle Closure Time [UTC]']
-        samples.append(pd.read_csv(io.StringIO(r.content.decode('utf-8')), parse_dates=times, date_format='ISO8601'))
+        r = requests.get(csv_url)
+        if r.status_code == requests.codes.ok:
+            times = ['Start Time [UTC]', 'CTD Bottle Closure Time [UTC]']
+            samples.append(pd.read_csv(io.StringIO(r.content.decode('utf-8')), parse_dates=times, date_format='ISO8601'))
 
     if not samples:
         # could not find any discrete sample data files for the specified site and cruise(s)
@@ -150,3 +166,31 @@ def get_discrete_samples(site_name, cruise=None):
                 samples[column] = samples[column].replace(-9999999., value=np.nan)
 
     return samples
+
+
+def distance_to_cast(samples, lat, lon):
+    """
+    Calculate the distance to the CTD cast (or other sampling method) location
+    from the specified lat/lon coordinates (usually the mooring) using the
+    Haversine formula.
+
+    :param samples: pandas DataFrame containing the discrete sample data
+    :param lat: latitude of the location to calculate the distance from
+    :param lon: longitude of the location to calculate the distance from
+    :return distance: pandas Series containing the distance to the cast location
+    """
+    r = 6371.0  # radius of the Earth in km (assumes a spherical Earth)
+    mlat = np.radians(lat)                                  # mooring latitude
+    slat = np.radians(samples['Start Latitude [degrees]'])  # sample latitudes
+
+    # calculate the differences in latitude and longitude
+    dlat = np.radians(lat - samples['Start Latitude [degrees]'])
+    dlon = np.radians(lon - samples['Start Longitude [degrees]'])
+
+    # calculate the distance using the Haversine formula
+    a = np.sin(dlat / 2)**2 + np.cos(mlat) * np.cos(slat) * np.sin(dlon / 2)**2
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+
+    # calculate the distance in km
+    distance = r * c
+    return distance

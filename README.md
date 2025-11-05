@@ -1,5 +1,6 @@
 # ooi-data-explorations
-Explorations of Ocean Observatories Initiative Datasets via MATLAB, Python, R, and Julia.
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17380223.svg)](https://doi.org/10.5281/zenodo.17380223)
+Explorations of Ocean Observatories Initiative Datasets via MATLAB, Python and R.
 
 ### matlab
 This subfolder contains a downloadable matlab toolbox that consists of three primary functions for requesting and accessing OOI data.
@@ -12,10 +13,6 @@ Installation instructions can be found in the README in that folder.
 ### R
 This subfolder contains a series of examples that utilize the ooim2mr package.
 Links to the R package and installation instructions can be found in the README in that folder.
-
-### Julia
-This subfolder contains a working set of functions that allows Julia users to download OOI data via the OOI M2M interface.
-
 
 ### OOI Nomenclature
 
