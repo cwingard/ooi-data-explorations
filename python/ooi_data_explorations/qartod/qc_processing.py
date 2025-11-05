@@ -252,12 +252,6 @@ def format_climatology(parameter, clm, sensor_range, depth_bins, site, node, sen
         'source': source,
     }
 
-    # set the number of standard deviations to use for the climatology test limits
-    if expanded:
-        nx = 5
-    else:
-        nx = 3
-
     # pull out the variance explained by the climatology model and set to 0 if not available
     var_explained = clm.regression['variance_explained']
     if len(var_explained) == 0:
@@ -283,11 +277,11 @@ def format_climatology(parameter, clm, sensor_range, depth_bins, site, node, sen
         # update the notes
         if var_explained[0] < 0.15:
             qc_dict['notes'] = ('The climatological ranges are based on the monthly mean plus/minus {}x '
-                                'the monthly standard deviations.'.format(nx))
+                                'the monthly standard deviations.'.format(stdx))
         else:
             qc_dict['notes'] = ('The climatological ranges are based on a 2-cycle harmonic fit to the monthly means '
                                 'plus/minus {}x the monthly standard deviations. The variance explained by the '
-                                'climatological model is {:.1%}.'.format(nx, var_explained[0]))
+                                'climatological model is {:.1%}.'.format(stdx, var_explained[0]))
 
     clm_table = header_str + '\n' + value_str
 
@@ -309,8 +303,8 @@ def process_climatology(ds, parameters, sensor_range, **kwargs):
         (optional input)
     :**fixed_upper: boolean flag to set the upper range to the sensor range
         (optional input)
-    :**expanded: boolean flag to use 3 or 5x the standard deviation for the
-        user range (optional input, default is 3x)
+    :**stdx: use Nx the standard deviation for the user range (optional input,
+        default is 3x)
     :**site: Site designator, extracted from the first part of the
         reference designator (optional input)
     :**node: Node designator, extracted from the second part of the
@@ -328,19 +322,11 @@ def process_climatology(ds, parameters, sensor_range, **kwargs):
     depth_bins = kwargs.get('depth_bins')
     fixed_lower = kwargs.get('fixed_lower')
     fixed_upper = kwargs.get('fixed_upper')
-    expanded = kwargs.get('expanded')
+    stdx = kwargs.get('stdx', 3)
     site = kwargs.get('site')
     node = kwargs.get('node')
     sensor = kwargs.get('sensor')
     stream = kwargs.get('stream')
-    fixed_lower = kwargs.get('fixed_lower')
-    fixed_upper = kwargs.get('fixed_upper')
-    extended = kwargs.get('extended')
-
-    if extended:
-        stdx = 5
-    else:
-        stdx = 3
 
     # initialize the Climatology class
     clm = Climatology()
@@ -379,10 +365,6 @@ def process_climatology(ds, parameters, sensor_range, **kwargs):
                     # create the formatted dictionary for the lookup tables
                     qc_dict, clm_table = format_climatology(param, clm, sensor_range[idx], bins, site, node, sensor,
                                                             stream, fixed_lower, fixed_upper, stdx)
-
-                    else:
-                        qc_dict, clm_table = format_climatology(param, clm, sensor_range[idx], bins, site, node, sensor,
-                                                                stream, fixed_lower, fixed_upper, expanded=True)
 
                     # append the dictionary to the dataframe and build the depth table
                     df = (pd.Series(qc_dict).to_frame()).transpose()
@@ -477,8 +459,8 @@ def process_gross_range(ds, parameters, sensor_range, **kwargs):
         (optional input)
     :**fixed_upper: boolean flag to set the upper range to the sensor range
         (optional input)
-    :**expanded: boolean flag to use 3 or 5x the standard deviation or MAD for
-        the user range (optional input, default is 3x)
+    :**stdx: use Nx the standard deviation for the user range (optional input,
+        default is 3x)
     :**site: Site designator, extracted from the first part of the
         reference designator (optional input)
     :**node: Node designator, extracted from the second part of the
@@ -493,30 +475,19 @@ def process_gross_range(ds, parameters, sensor_range, **kwargs):
     # process the optional keyword arguments
     fixed_lower = kwargs.get('fixed_lower')
     fixed_upper = kwargs.get('fixed_upper')
-    expanded = kwargs.get('expanded')
+    stdx = kwargs.get('stdx', 3)
     site = kwargs.get('site')
     node = kwargs.get('node')
     sensor = kwargs.get('sensor')
     stream = kwargs.get('stream')
-    fixed_lower = kwargs.get('fixed_lower')
-    fixed_upper = kwargs.get('fixed_upper')
-    extended = kwargs.get('extended')
 
-    if extended:
-        stdx = 5
-        percents = [0.0115, 99.9885]
-    else:
-        stdx = 3
+    if stdx == 3:
         percents = [0.15, 99.85]
+    else:
+        percents = [0.0115, 99.9885]
 
     # create an empty pandas dataframe to hold the results
     gross_range = []
-
-    # set the number of standard deviations to use for the gross range test limits
-    if not expanded:
-        nx = 3
-    else:
-        nx = 5
 
     # loop through the parameter(s) of interest, roughly estimating if the data is normally distributed using a
     # bootstrap analysis to randomly select 4500 data points to use, running the test a total of 5000 times
@@ -552,14 +523,14 @@ def process_gross_range(ds, parameters, sensor_range, **kwargs):
                 # 99.7% of the data
                 lower = np.nanpercentile(da, percents[0])
                 upper = np.nanpercentile(da, percents[1])
-                if extended:
-                    notes = ('User range based on percentiles of the observations, which are not normally '
-                             'distributed. Percentiles were chosen to cover 99.977% of the data, approximating '
-                             'a 5-sigma range.')
-                else:
+                if stdx == 3:
                     notes = ('User range based on percentiles of the observations, which are not normally '
                              'distributed. Percentiles were chosen to cover 99.7% of the data, approximating the '
                              'Empirical Rule.')
+                else:
+                    notes = ('User range based on percentiles of the observations, which are not normally '
+                             'distributed. Percentiles were chosen to cover 99.977% of the data, approximating '
+                             'a 5-sigma range.')
             else:
                 # most likely this data is normally distributed, or close enough, and we can use the mean
                 mu = da.mean().values

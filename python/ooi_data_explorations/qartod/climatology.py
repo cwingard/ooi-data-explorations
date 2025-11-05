@@ -199,6 +199,7 @@ class Climatology():
         if self.regression['residuals'].size > 0:
             if self.regression['variance_explained'] > 0.15:
                 # Calculate the two-cycle fitted data
+                t_out = np.arange(len(ts))
                 fitted_data = beta[0] + beta[1]*np.sin(2*np.pi*f*t_out) + beta[2]*np.cos(
                     2*np.pi*f*t_out) + beta[3]*np.sin(4*np.pi*f*t_out) + beta[4]*np.cos(4*np.pi*f*t_out)
 

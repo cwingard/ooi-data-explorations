@@ -7,7 +7,6 @@
     test limits
 """
 import dateutil.parser as parser
-import numpy as np
 import os
 import pandas as pd
 import pytz
@@ -15,10 +14,9 @@ import xarray as xr
 
 from ooi_data_explorations.common import get_annotations, get_vocabulary, load_gc_thredds, add_annotation_qc_flags
 from ooi_data_explorations.combine_data import combine_datasets
-from ooi_data_explorations.uncabled.process_ctdpf import ctdpf_wfp
-from ooi_data_explorations.qartod.qc_processing import identify_blocks, create_annotations, process_gross_range, \
-    process_climatology, woa_standard_bins, inputs, ANNO_HEADER, CLM_HEADER, GR_HEADER
-
+from ooi_data_explorations.uncabled.process_ctdpf import ctdpf_wfp, ctdpf_cspp
+from ooi_data_explorations.qartod.qc_processing import process_gross_range, process_climatology, woa_standard_bins, \
+    inputs, ANNO_HEADER, CLM_HEADER, GR_HEADER
 
 def combine_delivery_methods(site, node, sensor):
     """
@@ -34,31 +32,45 @@ def combine_delivery_methods(site, node, sensor):
         of the reference designator
     :return merged: the merged CTDPF dataset
     """
-    # set the stream and tag constants
-    tag = '.*CTDPF.*\\.nc$'
+    # set the tag
+    tag = r'.*CTDPF.*\.nc$'
 
-    # this CTDPF is part of a WFP and includes telemetered and recovered data
-    print('##### Downloading the telemetered CTDPF data for %s #####' % site)
-    telem = load_gc_thredds(site, node, sensor, 'telemetered', 'ctdpf_ckl_wfp_instrument', tag)
-    deployments = []
-    print('# -- Group the data by deployment and process the data')
-    grps = list(telem.groupby('deployment'))
-    for grp in grps:
-        print('# -- Processing telemetered deployment %s' % grp[0])
-        deployments.append(ctdpf_wfp(grp[1]))
-    deployments = [i for i in deployments if i]
-    telem = xr.concat(deployments, 'time')
+    if node == 'SP001':  # This is a CSPP
+       telem = None  # don't use the telemetered CSPP data
+       print('##### Downloading the recovered_cspp FLORT data for %s #####' % site)
+       rhost = load_gc_thredds(site, node, sensor, 'recovered_cspp', 'ctdpf_j_cspp_instrument_recovered', tag)
+       deployments = []
+       print('# -- Group the data by deployment and process the data')
+       grps = list(rhost.groupby('deployment'))
+       for grp in grps:
+           print('# -- Processing recovered_host deployment %s' % grp[0])
+           deployments.append(ctdpf_cspp(grp[1]))
+       deployments = [i for i in deployments if i]
+       rhost = xr.concat(deployments, 'time')
 
-    print('##### Downloading the recovered_wfp CTDPF data for %s #####' % site)
-    rhost = load_gc_thredds(site, node, sensor, 'recovered_wfp', 'ctdpf_ckl_wfp_instrument_recovered', tag)
-    deployments = []
-    print('# -- Group the data by deployment and process the data')
-    grps = list(rhost.groupby('deployment'))
-    for grp in grps:
-        print('# -- Processing recovered_host deployment %s' % grp[0])
-        deployments.append(ctdpf_wfp(grp[1]))
-    deployments = [i for i in deployments if i]
-    rhost = xr.concat(deployments, 'time')
+    else:  # This is a WFP
+        # this CTDPF is part of a WFP and includes telemetered and recovered data
+        print('##### Downloading the telemetered CTDPF data for %s #####' % site)
+        telem = load_gc_thredds(site, node, sensor, 'telemetered', 'ctdpf_ckl_wfp_instrument', tag)
+        deployments = []
+        print('# -- Group the data by deployment and process the data')
+        grps = list(telem.groupby('deployment'))
+        for grp in grps:
+            print('# -- Processing telemetered deployment %s' % grp[0])
+            deployments.append(ctdpf_wfp(grp[1]))
+        deployments = [i for i in deployments if i]
+        telem = xr.concat(deployments, 'time')
+
+        print('##### Downloading the recovered_wfp CTDPF data for %s #####' % site)
+        rhost = load_gc_thredds(site, node, sensor, 'recovered_wfp', 'ctdpf_ckl_wfp_instrument_recovered', tag)
+        deployments = []
+        print('# -- Group the data by deployment and process the data')
+        grps = list(rhost.groupby('deployment'))
+        for grp in grps:
+            print('# -- Processing recovered_host deployment %s' % grp[0])
+            deployments.append(ctdpf_wfp(grp[1]))
+        deployments = [i for i in deployments if i]
+        rhost = xr.concat(deployments, 'time')
 
     # merge, but do not resample the time records.
     merged = combine_datasets(telem, rhost, None, None)
@@ -126,10 +138,17 @@ def generate_qartod(site, node, sensor, cut_off):
     parameters = ['sea_water_electrical_conductivity', 'sea_water_temperature',
                   'sea_water_pressure', 'sea_water_practical_salinity']
     limits = [[0, 9], [-5, 35], [0, 600], [0, 42]]
+    stream = 'ctdpf_ckl_wfp_instrument'
+    if node == 'SP001':  # CSPP
+        stream = 'ctdpf_j_cspp_instrument_recovered'
+        if site in ['CE01ISSP', 'CE06ISSP']:
+            limits[2] = [0, 35]  # adjust the pressure limit for CSPP at these sites
+        else:
+            limits[2] = [0, 90]  # adjust the pressure limit for CSPP at the shelf sites
 
     # create the initial gross range entry
     gr_lookup = process_gross_range(data, parameters, limits, site=site,
-                                    node=node, sensor=sensor, stream='ctdpf_ckl_wfp_instrument')
+                                    node=node, sensor=sensor, stream=stream)
 
     # add the source comment
     gr_lookup['source'] = ('User Gross Range based on data collected from {} through to {}.'.format(start_date,
@@ -147,7 +166,7 @@ def generate_qartod(site, node, sensor, cut_off):
     limits = [[-5, 35], [0, 42]]
     clm_lookup, clm_table = process_climatology(data, parameters, limits, depth_bins=depth_bins,
                                                 site=site, node=node, sensor=sensor,
-                                                stream='ctdpf_ckl_wfp_instrument')
+                                                stream=stream)
 
     return annotations, gr_lookup, clm_lookup, clm_table
 
@@ -157,7 +176,7 @@ def main(argv=None):
     Download the CTDPF data from the Gold Copy THREDDS server and create the
     QARTOD gross range and climatology test lookup tables.
     """
-    # setup the input arguments
+    # set up the input arguments
     args = inputs(argv)
     site = args.site
     node = args.node
