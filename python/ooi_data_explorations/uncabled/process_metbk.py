@@ -39,8 +39,9 @@ def quality_checks(ds):
             continue
         # The primary failure mode of the METBK is to repeat the last value it received from a sensor.
         # Use the IOOS QARTOD flat line test to identify these cases (consider it suspect if it repeats
-        # for 10+ minutes and failed if it repeats for 20+ minutes).
-        flags = qartod.flat_line_test(ds[p].values, ds['time'].values, 600, 1200, 0.00001)
+        # for 5+ minutes and failed if it repeats for 7+ minutes).
+        flags = qartod.flat_line_test(np.array(ds[p].values, dtype=np.float64), np.array(ds['time'].values),
+                                      300, 420, 0.00001)
 
         # The secondary failure mode occurs when the METBK logger sets values to a NaN if no sensor data is available.
         # In the case of the sea surface conductivity and temperature data, different values are used to represent

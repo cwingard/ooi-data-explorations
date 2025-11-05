@@ -9,10 +9,15 @@ this_directory = path.abspath(path.dirname(__file__))
 with open(path.join(this_directory, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
+# load version from `version.py` without importing the package
+_version_ns = {}
+with open(path.join(this_directory, 'version.py'), encoding='utf-8') as f:
+    exec(f.read(), _version_ns)
+version = _version_ns.get('__version__', _version_ns.get('version', '0.0.0'))
 
 setup(
     name = 'ooi_data_explorations',
-    version = '0.2.3',
+    version = version,
     description = (
         'Collection of python processing modules for requesting data '
         'from the OOI M2M system'
@@ -38,21 +43,41 @@ setup(
     license = 'MIT',
     packages = find_packages(),
     install_requires = [
-        'xarray[accel]',
-        'dask',
-        'munch',
-        'tqdm',
-        'urllib3',
-        'numpy',
-        'pandas',
-        'gsw',
-        'requests',
+        'xarray[complete]',
+        'numpy>=1.26',
+        'packaging>24.1',
+        'pandas>=2.2',
+        'argcomplete',
         'beautifulsoup4',
+        'canyonbpy',
+        'cgsn_parsers @ https://bitbucket.org/ooicgsn/cgsn_parsers/get/master.zip',
+        'cgsn_processing @ https://bitbucket.org/ooicgsn/cgsn_processing/get/master.zip',
+        'distributed',
+        'ephem',
+        'erddapy',
+        'gsw',
+        'h5py',
+        'ioos-qc',
+        'ipykernel',
+        'ipympl',
+        'iris',
+        'loguru',
+        'munch',
+        'nodejs',
+        'nose',
+        'numexpr',
+        'pint',
+        'ppigrf',
+        'pyco2sys',
+        'pyncml',
+        'pysolar',
+        'pyseas @ https://bitbucket.org/ooicgsn/pyseas/get/develop.zip',
         'PyYAML',
-        'matplotlib',
-        'ntplib',
-        'netcdf4',
-        'h5netcdf',
+        's3fs',
+        'scikit-learn',
+        'sphinx',
+        'tqdm',
+        'xlrd'
     ],
     include_package_data=True,
     zip_safe=False

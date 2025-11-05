@@ -198,19 +198,18 @@ def quality_checks(ds, param, fail_min, fail_max, window="12H", center=True):
     mad = df.rolling(window=window, center=center).apply(median_absolute_difference)
 
     # Create a flag array to store the results
-    quality_flag = ds[param].astype(int)*0 + 1
+    quality_flag = ds[param].astype(int) * 0 + 1
 
     # Identify where values are below the 3 standard deviations
     mask = ds[param], median[param] - 3 * mad[param]
     quality_flag[mask] = 3
 
-    # Add to the dataset
     # Add the flags to the dataset
-    ds[param+"_quality_flag"] = flags
+    ds[param + "_quality_flag"] = quality_flag
 
-    # Add attributes
-    ds[param+"_quality_flag"].attrs = {
-        "standard_name": param+"_qc_flag",
+    # Add the attributes
+    ds[param + "_quality_flag"].attrs = {
+        "standard_name": param + "qc_flag",
         "long_name": f"QC Flag for {param}",
         "comment": "Flag which attempts to identify low-pCO2 values due to the re-zeroing sampling issue " +
                    "of the Pro-Oceanus with occurs about once every 12H."
@@ -284,6 +283,7 @@ def main(argv=None):
     else:
         pco2a.to_netcdf(out_file, mode='w', format='NETCDF4', engine='h5netcdf', encoding=ENCODINGS, group=nc_group)
 
+    return None
 
 if __name__ == '__main__':
     main()
