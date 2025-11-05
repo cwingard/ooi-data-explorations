@@ -2,7 +2,6 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-
 [project]
 authors = [
     {name="Christopher Wingard", email="chris.wingard@oregonstate.edu"},
@@ -20,7 +19,8 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE.txt"]
 description = "Tools for interacting with OOI data, including downloading, cleaning, and visualizing."
-keywords = ["URL parameters", "Ocean Observatories Initiative", "jupyter_server"]
+keywords = ["Ocean Observatories Initiative", "OOI", "oceanography", "marine science", "ocean data", "data analysis",
+    "data processing", "data visualization", "time series", "quality control"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: Jupyter",
@@ -31,36 +31,53 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
-        'xarray[accel]',
-        'dask',
-        'munch',
-        'tqdm',
-        'urllib3',
-        'numpy',
-        'pandas',
-        'gsw',
-        'requests',
-        'beautifulsoup4',
-        'PyYAML',
-        'matplotlib',
-        'ntplib',
-        'netcdf4',
-        'h5netcdf',
-]
+    "xarray[complete]",
+    "numpy>=1.26",
+    "packaging>24.1",
+    "pandas>=2.2",
+    "argcomplete",
+    "beautifulsoup4",
+    "canyonbpy",
+    "cgsn_parsers @ https://bitbucket.org/ooicgsn/cgsn_parsers/get/master.zip",
+    "cgsn_processing @ https://bitbucket.org/ooicgsn/cgsn_processing/get/master.zip",
+    "distributed",
+    "ephem",
+    "erddapy",
+    "gsw",
+    "h5py",
+    "ioos-qc",
+    "ipykernel",
+    "ipympl",
+    "iris",
+    "loguru",
+    "munch",
+    "nodejs",
+    "nose",
+    "numexpr",
+    "pint",
+    "ppigrf",
+    "pyco2sys",
+    "pyncml",
+    "pysolar",
+    "pyseas @ https://bitbucket.org/ooicgsn/pyseas/get/develop.zip",
+    "PyYAML",
+    "s3fs",
+    "scikit-learn",
+    "sphinx",
+    "tqdm",
+    "xlrd"]
 [project.optional-dependencies]
 dev = [
     "pre-commit",
     "ruff",
     "build",
     "hatch",
-    "ipykernel",
     "requests",
 ]
 
@@ -82,9 +99,11 @@ exclude = [
   "utilities",
 ]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.setuptools.dynamic]
 version = {attr = "ooi_data_explorations.version.__version__"}
-
 
 [tool.ruff]
 line-length = 88

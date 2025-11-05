@@ -1,47 +1,53 @@
 name: ooi
 channels:
   - conda-forge
-  - nodefaults
 dependencies:
-  - python=3.10
+  - python=3.12
   - argcomplete
   - beautifulsoup4
   - bottleneck
-  - chest
+  - cartopy
+  - cgsn_parsers
+  - cgsn_processing
   - conda-build
-  - configobj
-  - dask
+  - distributed
+  - ephem
   - erddapy
   - flox
-  - geos
   - gsw
-  - hdf4
   - h5netcdf
+  - h5py
+  - ipykernel
   - ipympl
-  - ioos_qc
-  - jupyterlab
-  - libnetcdf
-  - matplotlib
-  - munch>=2.1.0
-  - netcdf4
+  - ioos-qc
+  - iris
+  - loguru
+  - munch
+  - nc-time-axis
   - nodejs
   - nose
+  - numbagg
   - numexpr
-  - numpy=1.26
+  - opt_einsum
+  - packaging
+  - pint
   - pip
-  - pyasn1
-  - pyCO2SYS
-  - pyIGRF
+  - ppigrf
+  - pooch
   - pyncml
-  - pytz
+  - pyco2sys
+  - pydap
   - pysolar
   - pyYAML
-  - scipy
-  - simplejson
-  - sockjs-tornado
+  - s3fs
+  - scikit-learn
+  - seaborn
+  - sparse
+  - sphinx
   - tqdm
-  - xarray[accel]>=0.15.1
+  - xarray
   - xlrd
-  - yaml
+  - zarr
   - pip:
+    - canyonbpy
     - https://bitbucket.org/ooicgsn/pyseas/get/develop.zip

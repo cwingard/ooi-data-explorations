@@ -55,6 +55,12 @@ module for use in that environment. All commands below are to be run from a term
 
 Clone the `ooi-data-explorations` code to your local machine:
 ```shell
+# create a directory for the code to live in (this can be anywhere you want, 
+# but for now...
+cd ~
+mkdir code
+cd code
+
 # download the ooi-data-explorations code
 git clone https://github.com/oceanobservatories/ooi-data-explorations.git
 ```
@@ -74,28 +80,34 @@ conda develop .
 
 #### Create a pip environment
 If you prefer to use the `pip` package manager, follow this section to set up the `ooi` environment which has the 
-dependencies needed to run the `ooi-data-explorer` python code and example notebooks.
+dependencies needed to run the `ooi-data-explorations` python code and example notebooks.
 ```shell
+python -m venv ooi
+source ooi/bin/activate
 cd ooi-data-explorations/python
-python -m venv venv
-source venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 ```
 
-#### Ensure the python environment is available in JupyterHub
+#### Ensure the python environment is available in JupyterHub (or JupyterLab)
 If using this code in a JupyterHub environment, an additional step will be needed to ensure the environment is 
-available for running in a JupyterHub kernel. If using a pip environment, a couple of additional dependencies are 
-required. Install them with pip:
-```shell
-pip install ipykernel ipympl
-```
-For either the conda or pip environments, the environment must be added to a list of available kernels using the 
-following command:
+available for running in a JupyterHub kernel. For either the conda or pip environments, the environment must be added 
+to a list of available kernels using the following command:
 ```shell
 python -m ipykernel install --user --name=ooi
 ```
 Now the `ooi` kernel should be listed as available when running a Jupyter Notebook.
+
+Note, if you are using your own computer system, you will want to also install JupyterLab to run the example 
+notebooks (do this before adding the environment to the list of kernels). Since the OOI JupyterHub already has 
+JupyterLab installed, you can skip this step if using that system.
+```shell
+# if using conda
+conda install -c conda-forge jupyterlab
+
+# if using pip
+pip install jupyterlab
+```
 
 ### Access Credentials
 Access credentials are required to download data from OOINet via the M2M interface. Directions on how to obtain 
@@ -127,7 +139,7 @@ EOT
 If you already have python installed or are using the OOI JupyterHub, you can skip this section, as the required tools 
 are already available.
 
-In order to use the python code in this repository, you will need to set up the proper tools. There  are several 
+In order to use the python code in this repository, you will need to set up the proper tools. There are several 
 examples on how to this, so I'll avoid reinventing the wheel here. One of the best tutorials I've found has been 
 developed by the folks at [Earth Lab](https://www.earthdatascience.org/). The [tutorial](https://www.earthdatascience.org/workshops/setup-earth-analytics-python/setup-git-bash-conda/) they have 
 prepared will guide you through the process of setting up a system to use Python for Earth Science analysis from start
