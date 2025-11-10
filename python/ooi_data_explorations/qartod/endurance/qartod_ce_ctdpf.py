@@ -37,7 +37,7 @@ def combine_delivery_methods(site, node, sensor):
 
     if node == 'SP001':  # This is a CSPP
        telem = None  # don't use the telemetered CSPP data
-       print('##### Downloading the recovered_cspp FLORT data for %s #####' % site)
+       print('##### Downloading the recovered_cspp CTDPF data for %s #####' % site)
        rhost = load_gc_thredds(site, node, sensor, 'recovered_cspp', 'ctdpf_j_cspp_instrument_recovered', tag)
        deployments = []
        print('# -- Group the data by deployment and process the data')
@@ -47,7 +47,6 @@ def combine_delivery_methods(site, node, sensor):
            deployments.append(ctdpf_cspp(grp[1]))
        deployments = [i for i in deployments if i]
        rhost = xr.concat(deployments, 'time')
-
     else:  # This is a WFP
         # this CTDPF is part of a WFP and includes telemetered and recovered data
         print('##### Downloading the telemetered CTDPF data for %s #####' % site)
@@ -142,12 +141,12 @@ def generate_qartod(site, node, sensor, cut_off):
     if node == 'SP001':  # CSPP
         stream = 'ctdpf_j_cspp_instrument_recovered'
         if site in ['CE01ISSP', 'CE06ISSP']:
-            limits[2] = [0, 35]  # adjust the pressure limit for CSPP at these sites
+            limits[2] = [0, 35]  # adjust the pressure limit for CSPP at the inshore sites
         else:
-            limits[2] = [0, 90]  # adjust the pressure limit for CSPP at the shelf sites
+            limits[2] = [0, 95]  # adjust the pressure limit for CSPP at the shelf sites
 
     # create the initial gross range entry
-    gr_lookup = process_gross_range(data, parameters, limits, site=site,
+    gr_lookup = process_gross_range(data, parameters, limits, stdx=5, site=site,
                                     node=node, sensor=sensor, stream=stream)
 
     # add the source comment
@@ -164,9 +163,8 @@ def generate_qartod(site, node, sensor, cut_off):
     # create and format the climatology lookups and tables for the data
     parameters = ['sea_water_temperature', 'sea_water_practical_salinity']
     limits = [[-5, 35], [0, 42]]
-    clm_lookup, clm_table = process_climatology(data, parameters, limits, depth_bins=depth_bins,
-                                                site=site, node=node, sensor=sensor,
-                                                stream=stream)
+    clm_lookup, clm_table = process_climatology(data, parameters, limits, stdx=5, depth_bins=depth_bins,
+                                                site=site, node=node, sensor=sensor, stream=stream)
 
     return annotations, gr_lookup, clm_lookup, clm_table
 

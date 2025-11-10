@@ -11,7 +11,6 @@ import pandas as pd
 import sys
 
 from scipy.stats import normaltest
-from scipy.stats import median_abs_deviation as mad
 import dask
 from dask.diagnostics import ProgressBar
 
@@ -254,8 +253,16 @@ def format_climatology(parameter, clm, sensor_range, depth_bins, site, node, sen
 
     # pull out the variance explained by the climatology model and set to 0 if not available
     var_explained = clm.regression['variance_explained']
-    if len(var_explained) == 0:
-        var_explained = [0]
+    # coerce empty -> 0.0, single-element containers -> float, leave scalars unchanged
+    arr = np.asarray(var_explained)
+    if arr.size == 0:
+        var_explained = 0.0
+    elif arr.size == 1:
+        # .item() covers numpy scalars and 1-element arrays
+        var_explained = float(arr.item())
+    else:
+        # if it's a list-like with >1 elements, then something's wrong
+        return ValueError("Unexpected multiple variance_explained values")
 
     # create the climatology table
     for idx, mu in enumerate(clm.monthly_fit):
@@ -275,13 +282,13 @@ def format_climatology(parameter, clm, sensor_range, depth_bins, site, node, sen
         value_str += ',"[{:.5f}, {:.5f}]"'.format(cmin, cmax)
 
         # update the notes
-        if var_explained[0] < 0.15:
+        if var_explained < 0.15:
             qc_dict['notes'] = ('The climatological ranges are based on the monthly mean plus/minus {}x '
                                 'the monthly standard deviations.'.format(stdx))
         else:
             qc_dict['notes'] = ('The climatological ranges are based on a 2-cycle harmonic fit to the monthly means '
                                 'plus/minus {}x the monthly standard deviations. The variance explained by the '
-                                'climatological model is {:.1%}.'.format(stdx, var_explained[0]))
+                                'climatological model is {:.1f}.'.format(stdx, var_explained))
 
     clm_table = header_str + '\n' + value_str
 
@@ -494,10 +501,6 @@ def process_gross_range(ds, parameters, sensor_range, **kwargs):
     sensor_range = np.atleast_2d(sensor_range).tolist()
     for idx, param in enumerate(parameters):
         if param in ds.variables:
-            # Select out the data array of the desired param. This speeds up the processing
-            m = (ds[param] > sensor_range[idx][0]) & (ds[param] < sensor_range[idx][1]) & (~np.isnan(ds[param]))
-            da = ds[param][m]
-
             # Utilize dask to parallelize the random choice and calculate the pnorm
             random_choice = dask.delayed(np.random.choice)
 

@@ -183,8 +183,7 @@ class Climatology():
         beta, resid, rank, s = np.linalg.lstsq(X, ts_valid, rcond=None)
         total_ss = np.sum((ts_valid - ts_valid.mean()) ** 2)
         resid_sum = resid if resid.size else 0.0
-        r_squared = 1 - (resid_sum / total_ss if total_ss > 0 else 0.0)
-
+        r_squared = 1.0 - (resid_sum / total_ss if total_ss > 0 else 0.0)
         self.regression = {
             "beta": beta,
             "residuals": resid,

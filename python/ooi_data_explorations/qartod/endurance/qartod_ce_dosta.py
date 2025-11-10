@@ -17,7 +17,7 @@ from ooi_data_explorations.common import get_annotations, get_vocabulary, load_g
 from ooi_data_explorations.combine_data import combine_datasets
 from ooi_data_explorations.uncabled.process_dosta import dosta_datalogger, dosta_ctdbp_datalogger, \
     dosta_ctdbp_instrument, dosta_cspp
-from ooi_data_explorations.qartod.qc_processing import identify_blocks, create_annotations, process_gross_range, \
+from ooi_data_explorations.qartod.qc_processing import process_gross_range, \
     process_climatology, woa_standard_bins, inputs, ANNO_HEADER, CLM_HEADER, GR_HEADER
 
 
@@ -199,11 +199,12 @@ def generate_qartod(site, node, sensor, cut_off):
     limits = [[0, 500], [0, 500], [0, 500]]
 
     # create the initial gross range entry
-    gr_lookup = process_gross_range(data, parameters, limits, site=site,
-                                    node=node, sensor=sensor, stream='dosta_abcdjm_replace_me')
+    gr_lookup = process_gross_range(data, parameters, limits, stdx=5, site=site,
+                                    node=node, sensor=sensor, stream='dosta_abcdjm_replace_me',
+                                    fixed_lower=True)
 
     # add the stream name and the source comment
-    gr_lookup['notes'] = ('User range based on data collected through {}.'.format(src_date))
+    gr_lookup['source'] = ('User range based on data collected through {}.'.format(src_date))
 
     # based on the site and node, determine if we need a depth based climatology
     depth_bins = np.array([])
@@ -215,9 +216,10 @@ def generate_qartod(site, node, sensor, cut_off):
         depth_bins = depth_bins[m, :]
 
     # create and format the climatology lookups and tables for the data
-    clm_lookup, clm_table = process_climatology(data, parameters, limits, depth_bins=depth_bins,
+    clm_lookup, clm_table = process_climatology(data, parameters, limits, stdx=5, depth_bins=depth_bins,
                                                 site=site, node=node, sensor=sensor,
-                                                stream='dosta_abcdjm_replace_me')
+                                                stream='dosta_abcdjm_replace_me',
+                                                fixed_lower=True)
 
     # add the stream name
     clm_lookup['stream'] = 'dosta_abcdjm_replace_me'

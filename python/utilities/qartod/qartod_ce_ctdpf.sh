@@ -9,21 +9,23 @@
 # C. Wingard, 2022-06-17 -- Initial code
 
 # set the base directory python command for all subsequent processing
+# shellcheck disable=SC2046
+# shellcheck disable=SC2086
 . $(dirname $CONDA_EXE)/../etc/profile.d/conda.sh
 conda activate ooi
 PYTHON="python -m ooi_data_explorations.qartod.endurance.qartod_ce_ctdpf"
 
 ### CE01ISSP ###
-$PYTHON -s CE01ISSP -n SP001 -sn 05-CTDPFJ000 -co 2023-12-31T23:59:59
+$PYTHON -s CE01ISSP -n SP001 -sn 09-CTDPFJ000 -co 2025-12-31T23:59:59
 
 ### CE02SHSP ###
-$PYTHON -s CE02SHSP -n SP001 -sn 02-CTDPFJ000 -co 2023-12-31T23:59:59
+$PYTHON -s CE02SHSP -n SP001 -sn 08-CTDPFJ000 -co 2025-12-31T23:59:59
 
 ### CE06ISSP ###
-$PYTHON -s CE06ISSP -n SP001 -sn 05-CTDPFJ000 -co 2023-12-31T23:59:59
+$PYTHON -s CE06ISSP -n SP001 -sn 09-CTDPFJ000 -co 2025-12-31T23:59:59
 
 ### CE07SHSP ###
-$PYTHON -s CE07SHSP -n SP001 -sn 02-CTDPFJ000 -co 2023-12-31T23:59:59
+$PYTHON -s CE07SHSP -n SP001 -sn 08-CTDPFJ000 -co 2025-12-31T23:59:59
 
 ### CE09OSPM ###
-$PYTHON -s CE09OSPM -n WFP01 -sn 03-CTDPFK000 -co 2023-12-31T23:59:59
+#$PYTHON -s CE09OSPM -n WFP01 -sn 03-CTDPFK000 -co 2025-12-31T23:59:59

@@ -359,39 +359,26 @@ def dosta_cspp(ds):
     #   internal_timestamp == profiler_timestamp == time, redundant
     #   profiler_timestamp == time, redundant
     #   product_number, these are all 4831s and this is captured in the global attributes
-    #   estimated_oxygen_saturation_qc_executed, preliminary data product no QC tests should be applied
-    #   estimated_oxygen_saturation_qc_results, preliminary data product no QC tests should be applied
-    drop_list = ['suspect_timestamp', 'internal_timestamp', 'profiler_timestamp', 'product_number',
-                 'estimated_oxygen_saturation_qc_executed', 'estimated_oxygen_saturation_qc_results']
+    #   all qc_executed and qc_results variables as these older QC tests are now deprecated
+    #       in favor of the QARTOD style tests
+    drop_list = ['suspect_timestamp', 'internal_timestamp', 'profiler_timestamp', 'product_number']
     for var in ds.variables:
-        if var in drop_list:
-            ds = ds.drop(var)
+        if (var in drop_list) or ('_qc_' in var):
+            ds = ds.drop_vars(var)
 
     # rename some variables for better clarity
     rename = {
         'estimated_oxygen_concentration': 'oxygen_concentration',
-        'estimated_oxygen_concentration_qc_executed': 'oxygen_concentration_qc_executed',
-        'estimated_oxygen_concentration_qc_results': 'oxygen_concentration_qc_results',
         'estimated_oxygen_concentration_qartod_executed': 'oxygen_concentration_qartod_executed',
         'estimated_oxygen_concentration_qartod_results': 'oxygen_concentration_qartod_results',
         'estimated_oxygen_saturation': 'oxygen_saturation',
         'dosta_abcdjm_cspp_tc_oxygen': 'svu_oxygen_concentration',
-        'dosta_abcdjm_cspp_tc_oxygen_qc_executed': 'svu_oxygen_concentration_qc_executed',
-        'dosta_abcdjm_cspp_tc_oxygen_qc_results': 'svu_oxygen_concentration_qc_results',
         'dosta_abcdjm_cspp_tc_oxygen_qartod_executed': 'svu_oxygen_concentration_qartod_executed',
         'dosta_abcdjm_cspp_tc_oxygen_qartod_results': 'svu_oxygen_concentration_qartod_results',
         'dissolved_oxygen': 'oxygen_concentration_corrected',
-        'dissolved_oxygen_qc_executed': 'oxygen_concentration_corrected_qc_executed',
-        'dissolved_oxygen_qc_results': 'oxygen_concentration_corrected_qc_results',
         'dissolved_oxygen_qartod_executed': 'oxygen_concentration_corrected_qartod_executed',
         'dissolved_oxygen_qartod_results': 'oxygen_concentration_corrected_qartod_results',
         'pressure': 'sea_water_pressure',
-        'pressure_qc_executed': 'sea_water_pressure_qc_executed',
-        'pressure_qc_results': 'sea_water_pressure_qc_results',
-        'pressure_qartod_executed': 'sea_water_pressure_qartod_executed',
-        'pressure_qartod_results': 'sea_water_pressure_qartod_results',
-        'temperature': 'sea_water_temperature',
-        'salinity': 'sea_water_practical_salinity',
     }
     ds = ds.rename(rename)
 
@@ -426,30 +413,22 @@ def dosta_wfp(ds):
     #   suspect_timestamp = not used
     #   internal_timestamp == profiler_timestamp == time, redundant
     #   profiler_timestamp == time, redundant
-    #   product_number, these are all 4831s and this is captured in the global attributes
-    #   estimated_oxygen_saturation_qc_executed, preliminary data product no QC tests should be applied
-    #   estimated_oxygen_saturation_qc_results, preliminary data product no QC tests should be applied
-    drop_list = ['suspect_timestamp', 'internal_timestamp', 'profiler_timestamp', 'product_number',
-                 'estimated_oxygen_saturation_qc_executed', 'estimated_oxygen_saturation_qc_results']
+    #   all qc_executed and qc_results variables as these older QC tests are now deprecated
+    #       in favor of the QARTOD style tests
+    drop_list = ['suspect_timestamp', 'internal_timestamp', 'profiler_timestamp']
     for var in ds.variables:
-        if var in drop_list:
-            ds = ds.drop(var)
+        if (var in drop_list) or ('_qc_' in var):
+            ds = ds.drop_vars(var)
 
     # rename some variables for better clarity
     rename = {
         'estimated_oxygen_concentration': 'oxygen_concentration',
-        'estimated_oxygen_concentration_qc_executed': 'oxygen_concentration_qc_executed',
-        'estimated_oxygen_concentration_qc_results': 'oxygen_concentration_qc_results',
         'estimated_oxygen_concentration_qartod_executed': 'oxygen_concentration_qartod_executed',
         'estimated_oxygen_concentration_qartod_results': 'oxygen_concentration_qartod_results',
         'dissolved_oxygen': 'oxygen_concentration_corrected',
-        'dissolved_oxygen_qc_executed': 'oxygen_concentration_corrected_qc_executed',
-        'dissolved_oxygen_qc_results': 'oxygen_concentration_corrected_qc_results',
         'dissolved_oxygen_qartod_executed': 'oxygen_concentration_corrected_qartod_executed',
         'dissolved_oxygen_qartod_results': 'oxygen_concentration_corrected_qartod_results',
-        'int_ctd_pressure': 'seawater_pressure',
-        'sea_water_temperature': 'seawater_temperature',
-        'sea_water_practical_salinity': 'practical_salinity',
+        'int_ctd_pressure': 'sea_water_pressure',
     }
     ds = ds.rename(rename)
 
