@@ -40,8 +40,7 @@ def quality_checks(ds):
         # The primary failure mode of the METBK is to repeat the last value it received from a sensor.
         # Use the IOOS QARTOD flat line test to identify these cases (consider it suspect if it repeats
         # for 5+ minutes and failed if it repeats for 7+ minutes).
-        flags = qartod.flat_line_test(np.array(ds[p].values, dtype=np.float64), np.array(ds['time'].values),
-                                      300, 420, 0.00001)
+        flags = qartod.flat_line_test(np.array(ds[p].values, dtype=np.float64), np.array(ds['time']), 300, 420, 0.00001)
 
         # The secondary failure mode occurs when the METBK logger sets values to a NaN if no sensor data is available.
         # In the case of the sea surface conductivity and temperature data, different values are used to represent
@@ -63,10 +62,10 @@ def quality_checks(ds):
             ds[p][m] = np.nan  # convert any fill values to NaNs
             flags[m] = 9
 
-        # add the flags to the dataset, rolling up the results into a single value
+        # add the qc_flags to the dataset, rolling up the results into a single value
         qc_summary = p + '_qartod_results'
         if qc_summary in ds.variables:
-            # add the new test results to the existing QC summary results
+            # add the new test results to the existing QARTOD results
             qc = ds[qc_summary]
             flags = np.array([flags, qc.values])
             ds[qc_summary] = ('time', flags.max(axis=0, initial=1))
@@ -75,11 +74,16 @@ def quality_checks(ds):
             ds[qc_summary] = ('time', flags)
 
             # set up the attributes for the new variable
+            if ds[p].attrs.get('standard_name'):
+                standard_name = '%s status_flag' % ds[p].attrs['standard_name']
+            else:
+                standard_name = '%s status_flag' % p
             ds[qc_summary].attrs = dict({
-                'long_name': '%s QC Summary Flag' % ds[p].attrs['long_name'],
-                'standard_name': 'aggregate_quality_flag',
-                'comment': ('Summary quality flag combining the results of the instrument-specific quality tests with '
-                            'existing OOI QC tests, if available, to create a single QARTOD style aggregate quality flag'),
+                'long_name': '%s QARTOD Summary Flag' % ds[p].attrs['long_name'],
+                'standard_name': standard_name,
+                'comment': ('Summary QARTOD test flags. For each datum, the flag is set to the most significant '
+                            'result of all QARTOD tests run for that datum.'),
+                'references': 'https://ioos.noaa.gov/project/qartod https://github.com/ioos/ioos_qc',
                 'flag_values': np.array([1, 2, 3, 4, 9]),
                 'flag_meanings': 'pass not_evaluated suspect_or_of_high_interest fail missing'
             })
@@ -143,8 +147,7 @@ def metbk_datalogger(ds, burst=False):
     #   date_time_string == internal_timestamp, redundant so can remove
     #   dcl_controller_timestamp == time, redundant so can remove
     #   internal_timestamp == doesn't exist, always empty so can remove
-    #   ### Data products from downstream processing used to calculate hourly flux measurements. Remove from here to
-    #   ### keep this data set clean. Will obtain hourly flux data from a different stream.
+    #   ### Data products from downstream processing used to incorrectly calculate hourly flux measurements.
     #   met_barpres
     #   met_windavg_mag_corr_east
     #   met_windavg_mag_corr_north
@@ -160,10 +163,16 @@ def metbk_datalogger(ds, burst=False):
     #   met_latnflx_minute
     #   met_netlirr_minute
     #   met_sensflx_minute
-    ds = ds.drop(['dcl_controller_timestamp', 'internal_timestamp', 'met_barpres', 'met_windavg_mag_corr_east',
+    #   all older style QC variables, dropped in favor of QARTOD style summary flags
+    #   the _qartod_executed strings in favor of just the summary result flags
+    ds = ds.reset_coords()
+    drop_vars = ['dcl_controller_timestamp', 'internal_timestamp', 'met_barpres', 'met_windavg_mag_corr_east',
                   'met_windavg_mag_corr_north', 'met_netsirr', 'met_spechum', 'ct_depth', 'met_current_direction',
                   'met_current_speed', 'met_relwind_direction', 'met_relwind_speed', 'met_heatflx_minute',
-                  'met_latnflx_minute', 'met_netlirr_minute', 'met_sensflx_minute'])
+                  'met_latnflx_minute', 'met_netlirr_minute', 'met_sensflx_minute']
+    for v in ds.variables:
+        if (v in drop_vars) or ('_qc_' in v) or ('qartod_executed' in v):
+            ds = ds.drop_vars(v)
 
     # get rid of the older QC tests (OBE with the newer QARTOD tests) and the QARTOD executed test strings
     for v in ds.variables:
@@ -180,7 +189,7 @@ def metbk_datalogger(ds, burst=False):
             ds = ds.rename({key: value})
             ds[value].attrs['ooinet_variable_name'] = key
 
-    # run quality checks, adding the results to the QC summary flag
+    # run quality checks, adding the results to the QARTOD results flag
     quality_checks(ds)
 
     # re-calculate the practical salinity from temperature and conductivity after applying the quality checks
@@ -200,6 +209,13 @@ def metbk_datalogger(ds, burst=False):
     }
 
     if burst:   # re-sample the data to a 15-minute interval using a median average
+        # apply the QARTOD results to the data before averaging
+        for var in ds.data_vars:
+            qc_var = var + '_qartod_results'
+            if qc_var in ds.data_vars:
+                m = ds[qc_var] >= 4  # fail or missing
+                ds[var][m] = np.nan
+
         ds['time'] = ds['time'] + np.timedelta64(450, 's')
         burst = ds.resample(time='900s', skipna=True).median(dim='time', keep_attrs=True)
         burst = burst.where(~np.isnan(burst.deployment), drop=True)
