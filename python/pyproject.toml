@@ -93,6 +93,13 @@ extended = [
     "xlrd",
     "zarr",
 ]
+dashboard = [
+    "bokeh>=3.4",
+    "cmocean>=3.0",
+    "hvplot>=0.10",
+    "panel>=1.4",
+    "param>=2.0",
+]
 dev = [
     "pre-commit",
     "ruff",
@@ -102,7 +109,7 @@ dev = [
     "sphinx",
 ]
 all = [
-    "ooi_data_explorations[jupyter,extended,dev]",
+    "ooi_data_explorations[jupyter,extended,dashboard,dev]",
 ]
 
 [tool.hatch.version]

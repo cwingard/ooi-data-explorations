@@ -46,6 +46,11 @@ dependencies:
   - pyco2sys
   - pydap
   - scikit-learn
+  - bokeh
+  - cmocean
+  - hvplot
+  - panel
+  - param
   - seaborn
   - sparse
   - sphinx

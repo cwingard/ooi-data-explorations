@@ -15,12 +15,12 @@ import warnings
 
 from matplotlib.dates import DateFormatter
 
-from ooi_data_explorations.common import get_annotations, get_vocabulary, get_deployment_dates, load_gc_thredds
+from ooi_data_explorations.common import get_vocabulary, get_deployment_dates, load_gc_thredds
 from ooi_data_explorations.combine_data import combine_datasets
 from ooi_data_explorations.uncabled.process_ctdbp import ctdbp_datalogger, ctdbp_instrument
 from ooi_data_explorations.qartod.discrete_samples import get_discrete_samples, distance_to_cast
 from ooi_data_explorations.qartod.qc_processing import ANNO_HEADER, inputs
-from ooi_data_explorations.qartod.reporting import apply_qc_results
+from ooi_data_explorations.qartod.reporting import apply_qc_results, load_annotations
 
 
 def combine_delivery_methods(site, node, sensor, deployment):
@@ -228,44 +228,16 @@ def generate_report(site, node, sensor, deployment):
 
     # get the start and end dates for the deployment
     start, end = get_deployment_dates(site, node, sensor, deployment)
+    if start is None or end is None:
+        raise ValueError(
+            'Deployment dates for {}-{}-{} deployment {:02d} not found'.format(site, node, sensor, deployment)
+        )
     start = parser.parse(start, ignoretz=True)
     end = parser.parse(end, ignoretz=True)
     dates = [start, end]
 
     # get the current system annotations for the sensor
-    annotations = get_annotations(site, node, sensor)
-    annotations = pd.DataFrame(annotations)
-    if not annotations.empty:
-        annotations = annotations.drop(columns=['@class'])
-        annotations['beginDate'] = pd.to_datetime(annotations.beginDT, unit='ms').dt.strftime('%Y-%m-%dT%H:%M:%S')
-        annotations['endDate'] = pd.to_datetime(annotations.endDT, unit='ms').dt.strftime('%Y-%m-%dT%H:%M:%S')
-
-        # Convert the text based QC flags to numeric QARTOD-style flags
-        codes = {
-            None: 0,
-            'pass': 1,
-            'suspect': 3,
-            'fail': 4,
-            'not_operational': 9,
-            'not_available': 9
-        }
-        annotations['qcFlag'] = annotations['qcFlag'].map(codes).astype('category')
-
-        # limit the annotations to the deployment dates making sure to catch any that might span the deployment, be
-        # entirely within the deployment, or have start and/or end dates that fall within the deployment dates
-        annotations = annotations[((annotations.beginDate <= start.strftime('%Y-%m-%dT%H:%M:%S')) &
-                                   (annotations.endDate >= end.strftime('%Y-%m-%dT%H:%M:%S'))) |
-                                  ((annotations.beginDate >= start.strftime('%Y-%m-%dT%H:%M:%S')) &
-                                   (annotations.endDate <= end.strftime('%Y-%m-%dT%H:%M:%S'))) |
-                                  ((annotations.beginDate <= start.strftime('%Y-%m-%dT%H:%M:%S')) &
-                                   (annotations.endDate >= start.strftime('%Y-%m-%dT%H:%M:%S')) &
-                                   (annotations.endDate <= end.strftime('%Y-%m-%dT%H:%M:%S'))) |
-                                  ((annotations.beginDate >= start.strftime('%Y-%m-%dT%H:%M:%S')) &
-                                   (annotations.beginDate <= end.strftime('%Y-%m-%dT%H:%M:%S')) &
-                                   (annotations.endDate >= end.strftime('%Y-%m-%dT%H:%M:%S')))]
-
-        # sort the annotations by the beginDate
-        annotations = annotations.sort_values(by='beginDate')
+    annotations = load_annotations(site, node, sensor, start, end)
 
     # working through the 3 data streams, reformat the data, add the annotations and apply the QC tests
     for i in range(len(data)):

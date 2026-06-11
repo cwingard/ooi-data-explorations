@@ -5,12 +5,52 @@
 @brief Utility functions for creating data reports.
 """
 import os.path
+from datetime import datetime
 
 import matplotlib.pyplot as plt
+import pandas as pd
 
 from matplotlib.backends.backend_pdf import PdfPages
-from ooi_data_explorations.common import add_annotation_qc_flags
+from ooi_data_explorations.common import add_annotation_qc_flags, get_annotations
 from ooi_data_explorations.qartod.qc_processing import ANNO_HEADER
+
+
+_QC_FLAG_CODES = {
+    None: 0, 'pass': 1, 'suspect': 3, 'fail': 4, 'not_operational': 9, 'not_available': 9,
+}
+
+
+def load_annotations(
+    site: str, node: str, sensor: str, start: datetime, end: datetime
+) -> pd.DataFrame:
+    """
+    Fetch annotations for a reference designator, reformat them, and filter
+    to records that overlap the deployment window [start, end].
+
+    :param site: site designator
+    :param node: node designator
+    :param sensor: sensor designator
+    :param start: deployment start datetime
+    :param end: deployment end datetime
+    :return: filtered and sorted annotations DataFrame
+    """
+    annotations = pd.DataFrame(get_annotations(site, node, sensor))
+    if annotations.empty:
+        return annotations
+
+    annotations = annotations.drop(columns=['@class'])
+    annotations['beginDate'] = pd.to_datetime(annotations.beginDT, unit='ms').dt.strftime('%Y-%m-%dT%H:%M:%S')
+    annotations['endDate'] = pd.to_datetime(annotations.endDT, unit='ms').dt.strftime('%Y-%m-%dT%H:%M:%S')
+    annotations['qcFlag'] = annotations['qcFlag'].map(_QC_FLAG_CODES).astype('category')
+
+    s, e = start.strftime('%Y-%m-%dT%H:%M:%S'), end.strftime('%Y-%m-%dT%H:%M:%S')
+    mask = (
+        ((annotations.beginDate <= s) & (annotations.endDate >= e)) |
+        ((annotations.beginDate >= s) & (annotations.endDate <= e)) |
+        ((annotations.beginDate <= s) & (annotations.endDate >= s) & (annotations.endDate <= e)) |
+        ((annotations.beginDate >= s) & (annotations.beginDate <= e) & (annotations.endDate >= e))
+    )
+    return annotations[mask].sort_values(by='beginDate').reset_index(drop=True)
 
 
 def apply_qc_results(ds, annotations):
