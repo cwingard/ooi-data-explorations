@@ -5,8 +5,7 @@
 @brief Panel-based interactive dashboard for HITL review of QARTOD test
     limits and annotations for OOI data. Run with:
 
-        cd ~/code/ooi-data-explorations/python
-        python ooi_data_explorations/qartod/dashboard.py
+        ooi-dashboard
 """
 import ast
 import json
@@ -130,9 +129,9 @@ _DEFAULT_CMAP = "cmo.balance" if "cmo.balance" in _CMAPS else (_CMAPS[0] if _CMA
 _PLOT_COLORS: dict[str, dict[str, str]] = {
     "default": {
         "scatter": "black",
-        "suspect_line": "orange",
+        "suspect_line": "grey",
         "fail_line": "red",
-        "clim_line": "orange",
+        "clim_line": "grey",
     },
     "dark": {
         "scatter": "lightgrey",
@@ -141,6 +140,11 @@ _PLOT_COLORS: dict[str, dict[str, str]] = {
         "clim_line": "orange",
     },
 }
+
+
+def _is_nested_span(span: list | None) -> bool:
+    """Return True if span is a list of per-channel [lo, hi] pairs, not a flat [lo, hi]."""
+    return bool(span and isinstance(span[0], (list, tuple)))
 
 
 def _theme_colors() -> dict[str, str]:
@@ -276,7 +280,11 @@ class OOIDashboard(param.Parameterized):
     plot_type = param.Selector(default="timeseries", objects=["timeseries", "heatmap"])
     normalize = param.Boolean(default=False)
     color_var = param.Selector(default=None, objects=[None])
+    y_dim = param.Selector(default=None, objects=[None])
     colormap = param.Selector(default=_DEFAULT_CMAP, objects=_CMAPS)
+    col_start = param.Integer(default=0)
+    col_stride = param.Integer(default=1)
+    col_stop = param.Integer(default=-1)
 
     # Internal triggers: bumped to force plot re-render after data/annotation changes
     _data_gen = param.Integer(default=0, precedence=-1)
@@ -290,9 +298,8 @@ class OOIDashboard(param.Parameterized):
         self._data: dict[str, xr.Dataset] = {}
         self._gross_range: pd.DataFrame | None = None
         self._climatologies: dict[str, pd.DataFrame] = {}
-        self._var_map: dict[str, str] = {}
+        self._var_map: dict[str, list[str]] = {}
         self._clim_paths: list[str] = []
-        self._var_map_updating: bool = False
         self._sample_var_map: dict[str, list[str]] = {}
         self._samples_raw: pd.DataFrame | None = None
         self._samples: pd.DataFrame | None = None
@@ -338,49 +345,36 @@ class OOIDashboard(param.Parameterized):
             placeholder="No file selected",
             disabled=True,
             sizing_mode="stretch_width",
-            styles={"text-align": "right"},
         )
         self._w_gr_path_display = pn.widgets.TextInput(
             name="",
             placeholder="No file selected",
             disabled=True,
             sizing_mode="stretch_width",
-            styles={"text-align": "right"},
         )
         self._w_clim_path_display = pn.widgets.TextInput(
             name="",
             placeholder="No files selected",
             disabled=True,
             sizing_mode="stretch_width",
-            styles={"text-align": "right"},
         )
-        self._var_map_df = pd.DataFrame(
-            {"qartod_name": pd.Series(dtype=str), "dataset_name": pd.Series(dtype=str)}
+        self._var_map_container = pn.Column(
+            sizing_mode="stretch_width", visible=False
         )
-        self._w_var_map = pn.widgets.Tabulator(
-            self._var_map_df,
-            show_index=False,
-            sizing_mode="stretch_width",
-            editors={"qartod_name": None, "dataset_name": {"type": "input"}},
-            height=150,
-            visible=False,
-        )
-        self._w_var_map.param.watch(self._on_var_map_edit, "value")
 
         self._w_samples_path_display = pn.widgets.TextInput(
             name="",
             placeholder="No file selected",
             disabled=True,
             sizing_mode="stretch_width",
-            styles={"text-align": "right"},
         )
         self._w_append_path_display = pn.widgets.TextInput(
             name="",
             placeholder="No file selected",
             disabled=True,
             sizing_mode="stretch_width",
-            styles={"text-align": "right"},
         )
+
 
         # -- Gap detection controls --
         self._w_gap_threshold = pn.widgets.FloatInput(
@@ -416,6 +410,30 @@ class OOIDashboard(param.Parameterized):
             self.param.color_var, name="Color Variable"
         )
         self._w_color_var.visible = False
+        self._w_y_dim = pn.widgets.Select.from_param(
+            self.param.y_dim, name="Y Axis"
+        )
+        self._w_y_dim.visible = False
+        self._w_col_start = pn.widgets.IntInput(
+            name="Start", value=0, step=1, width=85
+        )
+        self._w_col_stride = pn.widgets.IntInput(
+            name="Stride", value=1, step=1, width=85
+        )
+        self._w_col_stop = pn.widgets.IntInput(
+            name="Stop", value=-1, step=1, width=85
+        )
+        for _w, _attr in (
+            (self._w_col_start, "col_start"),
+            (self._w_col_stride, "col_stride"),
+            (self._w_col_stop, "col_stop"),
+        ):
+            _w.param.watch(lambda e, a=_attr: setattr(self, a, e.new), "value")
+        self._col_range_section = pn.Column(
+            pn.pane.Markdown("**2D Column Range** (stop: -1 = last)"),
+            pn.Row(self._w_col_start, self._w_col_stride, self._w_col_stop),
+            visible=False,
+        )
         self._w_colormap = pn.widgets.Select.from_param(
             self.param.colormap, name="Colormap"
         )
@@ -470,6 +488,7 @@ class OOIDashboard(param.Parameterized):
             sizing_mode="stretch_width", visible=False
         )
         self.param.watch(self._on_variables_for_samples, "variables")
+        self.param.watch(self._on_variables_for_qartod, "variables")
 
         # -- Annotation Tabulator --
         self._anno_table = pn.widgets.Tabulator(
@@ -489,52 +508,52 @@ class OOIDashboard(param.Parameterized):
         )
         self._btn_m2m.on_click(self._load_from_m2m)
         self._btn_file = pn.widgets.Button(
-            name="Load data...", button_type="default"
+            name="Load data", button_type="primary"
         )
         self._btn_file.on_click(self._load_from_file)
         self._btn_append_file = pn.widgets.Button(
-            name="Append data...", button_type="default"
+            name="Append data", button_type="primary"
         )
         self._btn_append_file.on_click(self._append_from_file)
         self._btn_save_data = pn.widgets.Button(
-            name="Save data (.nc)", button_type="default"
+            name="Save data (.nc)", button_type="primary"
         )
         self._btn_save_data.on_click(self._save_data_nc)
         self._btn_load_gr = pn.widgets.Button(
-            name="Load gross range...", button_type="default"
+            name="Load gross range", button_type="primary"
         )
         self._btn_load_gr.on_click(self._load_gross_range)
 
         self._btn_load_clim = pn.widgets.Button(
-            name="Load climatology...", button_type="default"
+            name="Load climatology", button_type="primary"
         )
         self._btn_load_clim.on_click(self._load_climatology)
 
         # -- Buttons: discrete samples --
         self._btn_fetch_samples = pn.widgets.Button(
-            name="Fetch Discrete Samples", button_type="default"
+            name="Fetch discrete samples", button_type="primary"
         )
         self._btn_fetch_samples.on_click(self._fetch_discrete_samples)
         self._btn_load_samples_csv = pn.widgets.Button(
-            name="Load CSV...", button_type="default"
+            name="Load CSV", button_type="primary"
         )
         self._btn_load_samples_csv.on_click(self._load_samples_from_file)
         self._btn_save_samples_csv = pn.widgets.Button(
-            name="Save CSV", button_type="default"
+            name="Save CSV", button_type="primary"
         )
         self._btn_save_samples_csv.on_click(self._save_samples_csv)
 
         # -- Buttons: annotations --
         self._btn_fetch_anno = pn.widgets.Button(
-            name="Fetch Annotations", button_type="default"
+            name="Fetch annotations", button_type="primary"
         )
         self._btn_fetch_anno.on_click(self._fetch_annotations)
         self._btn_load_anno_csv = pn.widgets.Button(
-            name="Load from CSV", button_type="default"
+            name="Load from CSV", button_type="primary"
         )
         self._btn_load_anno_csv.on_click(self._load_annotations_csv)
         self._btn_add_anno = pn.widgets.Button(
-            name="Add Row", button_type="success", width=95
+            name="Add row", button_type="primary", width=95
         )
         self._btn_add_anno.on_click(self._add_anno_row)
         self._btn_del_anno = pn.widgets.Button(
@@ -558,7 +577,7 @@ class OOIDashboard(param.Parameterized):
         )
         self._btn_export_dels.on_click(self._export_deletes)
         self._btn_annotate = pn.widgets.Toggle(
-            name="Annotate", value=False, button_type="warning", width=95
+            name="Annotate", value=False, button_type="primary", width=95
         )
         self._btn_annotate.param.watch(self._on_annotate_toggle, "value")
 
@@ -574,9 +593,23 @@ class OOIDashboard(param.Parameterized):
         )
         self._btn_load_config.on_click(self._load_config)
         self._btn_save_config = pn.widgets.Button(
-            name="Save Config", button_type="default"
+            name="Save config", button_type="primary"
         )
         self._btn_save_config.on_click(self._save_config)
+        self._theme_pref: str = pn.config.theme
+        self._w_theme = pn.widgets.RadioButtonGroup(
+            name="Theme",
+            options=["default", "dark"],
+            value=pn.config.theme,
+            button_type="primary",
+            sizing_mode="stretch_width",
+        )
+        self._w_theme.param.watch(self._on_theme_change, "value")
+        self._btn_reset = pn.widgets.Button(
+            name="Reset dashboard", button_type="warning",
+            sizing_mode="stretch_width",
+        )
+        self._btn_reset.on_click(self._reset_dashboard)
 
         self._startup()
 
@@ -703,11 +736,11 @@ class OOIDashboard(param.Parameterized):
         self.deployment = saved_d if saved_d in deploy_opts else "All"
 
         self.param["method"].objects = [None] + available
+        self._prefill_sample_filters()
         saved_m = self._cfg.get("method") if self._loading_config else None
         self.method = (
             saved_m if (saved_m and saved_m in available) else _default_method(available)
         )
-        self._prefill_sample_filters()
 
     @param.depends("method", watch=True)
     def _on_method(self) -> None:
@@ -752,10 +785,6 @@ class OOIDashboard(param.Parameterized):
             self._w_tag.value = "deployment{:04d}.*\\.nc$".format(
                 int(self.deployment)
             )
-
-    # ------------------------------------------------------------------
-    # File browse callbacks
-    # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
     # Data loading
@@ -821,7 +850,7 @@ class OOIDashboard(param.Parameterized):
             if not picked:
                 return
             self.data_path = picked
-            self._w_data_path_display.value = picked
+            self._w_data_path_display.value = os.path.basename(picked)
         path = self.data_path.strip()
         if not path or not os.path.exists(path):
             self._set_status("Select a NetCDF file first.", "warning")
@@ -853,7 +882,7 @@ class OOIDashboard(param.Parameterized):
             if not picked:
                 return
             self.gross_range_path = picked
-            self._w_gr_path_display.value = picked
+            self._w_gr_path_display.value = os.path.basename(picked)
         path = self.gross_range_path.strip()
         if not path or not os.path.exists(path):
             self._set_status("Select a gross range CSV first.", "warning")
@@ -922,7 +951,9 @@ class OOIDashboard(param.Parameterized):
                 return
             self._clim_paths = list(paths)
             n = len(paths)
-            self._w_clim_path_display.value = f"{n} file{'s' if n > 1 else ''} selected"
+            self._w_clim_path_display.value = (
+                os.path.basename(paths[0]) if n == 1 else f"{n} files selected"
+            )
         if not self._clim_paths:
             self._set_status("Select climatology CSV files first.", "warning")
             return
@@ -963,51 +994,50 @@ class OOIDashboard(param.Parameterized):
 
     def _auto_populate_var_map(self, has_depth: bool = False) -> None:
         """
-        Build the variable mapping table from loaded limits. Exact-match names
-        are pre-filled; mismatches require user correction via the Tabulator.
+        Build per-variable MultiSelect widgets from loaded QARTOD limits.
+        Options are all QARTOD names from gross range and climatologies.
+        Existing selections in _var_map are preserved.
         """
         qnames: list[str] = []
         if self._gross_range is not None and "_var" in self._gross_range.columns:
-            qnames.extend(self._gross_range["_var"].dropna().tolist())
+            qnames.extend(self._gross_range["_var"].dropna().unique().tolist())
         for k in self._climatologies:
             if k not in qnames:
                 qnames.append(k)
-        if not qnames and not has_depth:
+        if not qnames or not self.variables:
+            self._var_map_container.visible = False
             return
+        widgets = []
+        for v in self.variables:
+            existing = self._var_map.get(v, [])
+            if not existing:
+                existing = [q for q in qnames if q == v]
+            resolved = [q for q in existing if q in qnames]
+            self._var_map[v] = resolved
+            w = pn.widgets.MultiSelect(
+                name=v,
+                options=qnames,
+                value=resolved,
+                size=min(5, max(3, len(qnames))),
+                sizing_mode="stretch_width",
+            )
+            w.param.watch(
+                lambda e, var=v: self._on_var_map_change(var, e.new),
+                "value",
+            )
+            widgets.append(w)
+        self._var_map_container.objects = widgets
+        self._var_map_container.visible = True
 
-        dataset_vars: set[str] = set()
-        for ds in self._data.values():
-            dataset_vars.update(str(v) for v in ds.data_vars)
-            dataset_vars.update(str(v) for v in ds.coords)
-
-        rows = [
-            {
-                "qartod_name": qn,
-                "dataset_name": self._var_map.get(qn, qn),
-            }
-            for qn in qnames
-        ]
-        if has_depth:
-            rows.append({
-                "qartod_name": "__depth__",
-                "dataset_name": self._var_map.get("__depth__", ""),
-            })
-
-        new_df = pd.DataFrame(rows)
-        self._var_map = dict(zip(new_df["qartod_name"], new_df["dataset_name"]))
-        self._var_map_updating = True
-        self._var_map_df = new_df
-        self._w_var_map.value = new_df
-        self._w_var_map.visible = bool(rows)
-        self._var_map_updating = False
-
-    def _on_var_map_edit(self, event=None) -> None:
-        """Sync the variable mapping Tabulator back to _var_map and redraw."""
-        if self._var_map_updating:
-            return
-        df = self._w_var_map.value
-        self._var_map = dict(zip(df["qartod_name"], df["dataset_name"]))
+    def _on_var_map_change(self, var: str, value: list[str]) -> None:
+        self._var_map[var] = value
         self._data_gen += 1
+
+    def _on_theme_change(self, event) -> None:
+        self._theme_pref = event.new
+
+    def _on_variables_for_qartod(self, event=None) -> None:
+        self._auto_populate_var_map()
 
     def _append_from_file(self, event=None) -> None:
         """
@@ -1026,7 +1056,7 @@ class OOIDashboard(param.Parameterized):
             if not picked:
                 return
             self._append_path = picked
-            self._w_append_path_display.value = picked
+            self._w_append_path_display.value = os.path.basename(picked)
         path = self._append_path
         if not path or not os.path.exists(path):
             self._set_status("Select a NetCDF file to append first.", "warning")
@@ -1078,7 +1108,7 @@ class OOIDashboard(param.Parameterized):
         try:
             ds.to_netcdf(path)
             self.data_path = path
-            self._w_data_path_display.value = path
+            self._w_data_path_display.value = os.path.basename(path)
             self._set_status(f"Data saved to {os.path.basename(path)}.", "success")
         except Exception as e:
             self._set_status(f"Save failed: {e}", "danger")
@@ -1112,11 +1142,6 @@ class OOIDashboard(param.Parameterized):
                 f"No gaps >= {threshold_hours:.0f} h found in the loaded data.", "info"
             )
             return
-
-        if "id" not in self._anno_df.columns:
-            self._anno_df = pd.DataFrame(columns=_ANNO_COLS)
-            self._anno_table.value = self._anno_df
-            self._anno_table.editors = self._anno_editors()
 
         new_rows = []
         for gs, ge, dur in zip(gap_starts, gap_ends, gap_durations):
@@ -1173,9 +1198,11 @@ class OOIDashboard(param.Parameterized):
         if var not in ds:
             return
         extra_dims = [d for d in ds[var].dims if "time" not in d and d != "obs"]
-        detected = "heatmap" if extra_dims else "timeseries"
+        detected = "timeseries"
         self.plot_type = detected
         self._w_plot_type.value = detected
+        self.param["y_dim"].objects = [None] + extra_dims
+        self.y_dim = extra_dims[0] if extra_dims else None
 
     @param.depends("plot_type", watch=True)
     def _on_plot_type(self) -> None:
@@ -1184,6 +1211,24 @@ class OOIDashboard(param.Parameterized):
         self._w_variables.visible = not is_heatmap
         self._w_normalize.visible = not is_heatmap
         self._w_color_var.visible = is_heatmap
+        self._w_y_dim.visible = is_heatmap
+        self._col_range_section.visible = not is_heatmap
+
+    @param.depends("color_var", watch=True)
+    def _on_color_var(self) -> None:
+        """Update y_dim options when color variable changes."""
+        if self.color_var is None or not self._data:
+            return
+        ds = next(iter(self._data.values()))
+        if self.color_var not in ds:
+            return
+        extra_dims = [
+            d for d in ds[self.color_var].dims
+            if "time" not in d and d != "obs"
+        ]
+        self.param["y_dim"].objects = [None] + extra_dims
+        if self.y_dim not in extra_dims:
+            self.y_dim = extra_dims[0] if extra_dims else None
 
     # ------------------------------------------------------------------
     # Discrete samples
@@ -1365,7 +1410,7 @@ class OOIDashboard(param.Parameterized):
             if not picked:
                 return
             self._samples_csv_path = picked
-            self._w_samples_path_display.value = picked
+            self._w_samples_path_display.value = os.path.basename(picked)
         path = self._samples_csv_path
         if not path or not os.path.exists(path):
             self._set_status("Select a discrete samples CSV file first.", "warning")
@@ -1397,7 +1442,7 @@ class OOIDashboard(param.Parameterized):
         try:
             self._samples_raw.to_csv(path, index=False)
             self._samples_csv_path = path
-            self._w_samples_path_display.value = path
+            self._w_samples_path_display.value = os.path.basename(path)
             self._set_status(
                 f"{len(self._samples_raw)} samples saved to {os.path.basename(path)}.",
                 "success",
@@ -1488,10 +1533,11 @@ class OOIDashboard(param.Parameterized):
     @staticmethod
     def _anno_editors() -> dict:
         """
-        Tabulator editor config for ANNO_HEADER columns. 'id' is absent
-        intentionally -- read-only: blank for new rows, populated for M2M records.
+        Tabulator editor config for ANNO_HEADER columns. 'id' is read-only:
+        blank for new rows, populated for M2M records -- no user control.
         """
         return {
+            "id": None,
             "subsite": {"type": "input"},
             "node": {"type": "input"},
             "sensor": {"type": "input"},
@@ -1512,11 +1558,6 @@ class OOIDashboard(param.Parameterized):
         Append a blank annotation row pre-filled with the current reference
         designator. Works before a fetch (initializes the table on first call).
         """
-        if self._anno_df.empty and "id" not in self._anno_df.columns:
-            self._anno_df = pd.DataFrame(columns=_ANNO_COLS)
-            self._anno_table.value = self._anno_df
-            self._anno_table.editors = self._anno_editors()
-
         blank: dict = {col: None for col in _ANNO_COLS}
         blank["subsite"] = self.site
         blank["node"] = self.node
@@ -1590,8 +1631,8 @@ class OOIDashboard(param.Parameterized):
     # ------------------------------------------------------------------
 
     @param.depends(
-        "variables", "plot_type", "normalize", "color_var", "colormap",
-        "_data_gen", "_anno_gen",
+        "variables", "plot_type", "normalize", "color_var", "y_dim", "colormap",
+        "col_start", "col_stride", "col_stop", "_data_gen", "_anno_gen",
     )
     def _plot_view(self):
         if not _HAS_HVPLOT:
@@ -1692,42 +1733,41 @@ class OOIDashboard(param.Parameterized):
                 self._gross_range is not None
                 and "_var" in self._gross_range.columns
             ):
-                qname = self._var_map.get(var, var)
-                matches = self._gross_range[self._gross_range["_var"] == qname]
+                qnames = self._var_map.get(var, [var])
+                matches = self._gross_range[self._gross_range["_var"].isin(qnames)]
                 if not matches.empty:
                     gr = matches.iloc[0]
                     sus = gr.get("_suspect_span")
                     fail = gr.get("_fail_span")
                     tc = _theme_colors()
-                    for val, dash, color in [
-                        (sus[0] if sus else None, "dashed", tc["suspect_line"]),
-                        (sus[1] if sus else None, "dashed", tc["suspect_line"]),
-                        (fail[0] if fail else None, "solid", tc["fail_line"]),
-                        (fail[1] if fail else None, "solid", tc["fail_line"]),
-                    ]:
-                        if val is not None:
-                            bokeh_plot.add_layout(Span(
-                                location=float(val),
-                                dimension="width",
-                                line_color=color,
-                                line_dash=dash,
-                                line_width=1.25,
-                            ))
+                    if not _is_nested_span(sus) and not _is_nested_span(fail):
+                        for val, dash, color in [
+                            (sus[0] if sus else None, "dashed", tc["suspect_line"]),
+                            (sus[1] if sus else None, "dashed", tc["suspect_line"]),
+                            (fail[0] if fail else None, "solid", tc["fail_line"]),
+                            (fail[1] if fail else None, "solid", tc["fail_line"]),
+                        ]:
+                            if val is not None:
+                                bokeh_plot.add_layout(Span(
+                                    location=float(val),
+                                    dimension="width",
+                                    line_color=color,
+                                    line_dash=dash,
+                                    line_width=1.25,
+                                ))
 
             # --- Climatology step-function lines ---
-            qname = self._var_map.get(var, var)
-            clim_df = self._climatologies.get(qname)
-            if clim_df is None:
-                clim_df = self._climatologies.get(var)
+            qnames = self._var_map.get(var, [var])
+            clim_df = next(
+                (self._climatologies[q] for q in qnames if q in self._climatologies),
+                self._climatologies.get(var),
+            )
             if clim_df is not None:
                 zero_rows = [idx for idx in clim_df.index if list(idx) == [0, 0]]
                 if zero_rows:
                     clim_row = clim_df.loc[zero_rows[0]]
                     for _, ds in self._data.items():
-                        dv = self._var_map.get(var, var)
-                        if dv not in ds:
-                            dv = var
-                        if dv not in ds:
+                        if var not in ds:
                             continue
                         times = pd.DatetimeIndex(ds["time"].values)
                         times_ms = [
@@ -1758,6 +1798,7 @@ class OOIDashboard(param.Parameterized):
                         break  # use first dataset only
 
         return hook
+
     def _build_stacked_subplots(self):
         multi_method = len(self._data) > 1
         subplot_h = max(200, min(350, 700 // len(self.variables)))
@@ -1765,40 +1806,82 @@ class OOIDashboard(param.Parameterized):
         subplots = []
         for var in self.variables:
             curves = []
+            is_2d = False
             for method, ds in self._data.items():
                 if var not in ds:
                     continue
-                has_dep = (
-                    "deployment" in ds.data_vars or "deployment" in ds.coords
-                )
-                cols = [var] + (["deployment"] if has_dep else [])
-                df = (
-                    ds[cols].to_dataframe().reset_index().dropna(subset=[var])
-                )
-                if df.empty:
-                    continue
-
-                if has_dep and "deployment" in df.columns:
-                    df = df.copy()
-                    suffix = f" ({method})" if multi_method else ""
-                    df["label"] = df["deployment"].apply(
-                        lambda d: f"dep {int(d)}{suffix}"
+                extra_dims = [
+                    d for d in ds[var].dims if "time" not in d and d != "obs"
+                ]
+                if extra_dims:
+                    is_2d = True
+                    dim = extra_dims[0]
+                    n = ds.dims[dim]
+                    dim_coords = (
+                        ds.coords[dim].values if dim in ds.coords
+                        else np.arange(n)
                     )
-                    by_kw: dict = {"by": "label"}
-                elif multi_method:
-                    by_kw = {"label": method}
+                    start = max(0, self.col_start)
+                    stop = n if self.col_stop < 0 else min(n, self.col_stop + 1)
+                    stride = max(1, self.col_stride)
+                    for idx in range(start, stop, stride):
+                        col_val = dim_coords[idx]
+                        col_label = (
+                            f"{col_val:.4g}"
+                            if isinstance(
+                                col_val, (int, float, np.integer, np.floating)
+                            )
+                            else str(col_val)
+                        )
+                        if multi_method:
+                            col_label = f"{col_label} ({method})"
+                        df = (
+                            ds[var].isel({dim: idx})
+                            .to_dataframe()
+                            .reset_index()
+                            .dropna(subset=[var])
+                        )
+                        if df.empty:
+                            continue
+                        p = df.hvplot.line(
+                            x="time",
+                            y=var,
+                            label=col_label,
+                            line_dash=_METHOD_DASH.get(method, "solid"),
+                            ylabel=var,
+                            grid=True,
+                        )
+                        curves.append(p)
                 else:
-                    by_kw = {}
-
-                p = df.hvplot.line(
-                    x="time",
-                    y=var,
-                    **by_kw,
-                    line_dash=_METHOD_DASH.get(method, "solid"),
-                    ylabel=var,
-                    grid=True,
-                )
-                curves.append(p)
+                    has_dep = (
+                        "deployment" in ds.data_vars or "deployment" in ds.coords
+                    )
+                    cols = [var] + (["deployment"] if has_dep else [])
+                    df = (
+                        ds[cols].to_dataframe().reset_index().dropna(subset=[var])
+                    )
+                    if df.empty:
+                        continue
+                    if has_dep and "deployment" in df.columns:
+                        df = df.copy()
+                        suffix = f" ({method})" if multi_method else ""
+                        df["label"] = df["deployment"].apply(
+                            lambda d: f"dep {int(d)}{suffix}"
+                        )
+                        by_kw: dict = {"by": "label"}
+                    elif multi_method:
+                        by_kw = {"label": method}
+                    else:
+                        by_kw = {}
+                    p = df.hvplot.line(
+                        x="time",
+                        y=var,
+                        **by_kw,
+                        line_dash=_METHOD_DASH.get(method, "solid"),
+                        ylabel=var,
+                        grid=True,
+                    )
+                    curves.append(p)
 
             if not curves:
                 continue
@@ -1806,11 +1889,12 @@ class OOIDashboard(param.Parameterized):
             for sc in self._build_limit_scatter(var):
                 curves.append(sc)
 
-            for sc in self._build_sample_scatter(var):
-                curves.append(sc)
+            if not is_2d:
+                for sc in self._build_sample_scatter(var):
+                    curves.append(sc)
 
             subplot = reduce(operator.mul, curves).opts(
-                show_legend=multi_method,
+                show_legend=is_2d or multi_method,
                 legend_position="bottom_right",
                 hooks=[self._make_annotation_hook(var)],
             )
@@ -1838,6 +1922,11 @@ class OOIDashboard(param.Parameterized):
             for method, ds in self._data.items():
                 if var not in ds:
                     continue
+                extra_dims = [
+                    d for d in ds[var].dims if "time" not in d and d != "obs"
+                ]
+                if extra_dims:
+                    continue  # 2D variables not supported in normalize mode
                 df = (
                     ds[[var]].to_dataframe().reset_index().dropna(subset=[var])
                 )
@@ -1891,9 +1980,18 @@ class OOIDashboard(param.Parameterized):
                 "*Variable has no depth/bin dimension for heatmap.*",
                 styles={"color": "#888"},
             )
+        y_dim = self.y_dim
+        if y_dim is not None and y_dim not in ds[self.color_var].dims:
+            return pn.pane.Markdown(
+                f"*Y Axis dimension '{y_dim}' is not available for "
+                f"'{self.color_var}'. Select a compatible Y Axis.*",
+                styles={"color": "#888"},
+            )
+        if y_dim is None:
+            y_dim = extra_dims[0]
         p = ds[self.color_var].hvplot.quadmesh(
             x="time",
-            y=extra_dims[0],
+            y=y_dim,
             cmap=self.colormap,
             responsive=True,
             height=400,
@@ -1910,31 +2008,27 @@ class OOIDashboard(param.Parameterized):
         if not self._data:
             return []
 
-        qname = self._var_map.get(var, var)
+        qnames = self._var_map.get(var, [var])
 
         gr_row = None
         if self._gross_range is not None and "_var" in self._gross_range.columns:
-            matches = self._gross_range[self._gross_range["_var"] == qname]
+            matches = self._gross_range[self._gross_range["_var"].isin(qnames)]
             if not matches.empty:
                 gr_row = matches.iloc[0]
 
-        clim_df = self._climatologies.get(qname)
-        if clim_df is None:
-            clim_df = self._climatologies.get(var)
+        clim_df = next(
+            (self._climatologies[q] for q in qnames if q in self._climatologies),
+            self._climatologies.get(var),
+        )
 
         if gr_row is None and clim_df is None:
             return []
 
         dfs: list[pd.DataFrame] = []
         for ds in self._data.values():
-            dv = self._var_map.get(var, var)
-            if dv not in ds:
-                dv = var
-            if dv not in ds:
+            if var not in ds:
                 continue
-            df = ds[[dv]].to_dataframe().reset_index().dropna(subset=[dv]).copy()
-            if dv != var:
-                df = df.rename(columns={dv: var})
+            df = ds[[var]].to_dataframe().reset_index().dropna(subset=[var]).copy()
             dfs.append(df)
 
         if not dfs:
@@ -1947,14 +2041,35 @@ class OOIDashboard(param.Parameterized):
         if gr_row is not None:
             fail_span: list | None = gr_row.get("_fail_span")
             suspect_span: list | None = gr_row.get("_suspect_span")
+            extra_cols = [c for c in all_df.columns if c not in ("time", var)]
+            chan_col = extra_cols[0] if extra_cols else None
+
             if fail_span is not None:
-                fail_mask = (
-                    (all_df[var] < fail_span[0]) | (all_df[var] > fail_span[1])
-                )
+                if not _is_nested_span(fail_span):
+                    fail_mask = (
+                        (all_df[var] < fail_span[0]) | (all_df[var] > fail_span[1])
+                    )
+                elif chan_col is not None:
+                    for i, chan_val in enumerate(sorted(all_df[chan_col].unique())):
+                        if i >= len(fail_span):
+                            break
+                        lo, hi = fail_span[i]
+                        m = all_df[chan_col] == chan_val
+                        fail_mask |= m & ((all_df[var] < lo) | (all_df[var] > hi))
             if suspect_span is not None:
-                suspect_mask = (
-                    (all_df[var] < suspect_span[0]) | (all_df[var] > suspect_span[1])
-                ) & ~fail_mask
+                if not _is_nested_span(suspect_span):
+                    suspect_mask = (
+                        (all_df[var] < suspect_span[0]) | (all_df[var] > suspect_span[1])
+                    ) & ~fail_mask
+                elif chan_col is not None:
+                    for i, chan_val in enumerate(sorted(all_df[chan_col].unique())):
+                        if i >= len(suspect_span):
+                            break
+                        lo, hi = suspect_span[i]
+                        m = all_df[chan_col] == chan_val
+                        suspect_mask |= (
+                            m & ((all_df[var] < lo) | (all_df[var] > hi)) & ~fail_mask
+                        )
 
         if clim_df is not None:
             zero_rows = [idx for idx in clim_df.index if list(idx) == [0, 0]]
@@ -1962,7 +2077,7 @@ class OOIDashboard(param.Parameterized):
                 clim_row = clim_df.loc[zero_rows[0]]
                 months = pd.DatetimeIndex(all_df["time"]).month
                 for col_span, val in clim_row.items():
-                    m_mask = months == col_span[0]
+                    m_mask = (months >= col_span[0]) & (months <= col_span[1])
                     out = m_mask & (
                         (all_df[var] < val[0]) | (all_df[var] > val[1])
                     )
@@ -1994,27 +2109,36 @@ class OOIDashboard(param.Parameterized):
     def _build_config_dict(self) -> dict:
         """Collect all current dashboard state into a serialisable dict."""
         return {
+            # Select Data
             "site": self.site,
             "node": self.node,
             "sensor": self.sensor,
             "method": self.method,
             "stream": self.stream,
             "deployment": self.deployment,
+            "file_regex": self._w_tag.value,
             "data_path": self.data_path,
+            # Variables & Display
+            "variables": list(self.variables),
+            "colormap": self.colormap,
+            "col_start": self.col_start,
+            "col_stride": self.col_stride,
+            "col_stop": self.col_stop,
+            "theme": self._theme_pref,
+            # QARTOD
             "gross_range_path": self.gross_range_path,
             "clim_paths": self._clim_paths,
-            "var_map": self._var_map,
-            "sample_var_map": self._sample_var_map,
+            "qartod_var_map": self._var_map,
+            # Discrete Samples
             "sample_arrays": list(self._w_sample_arrays.value),
+            "samples_csv_path": self._samples_csv_path,
             "depth_min": self._w_depth_min.value,
             "depth_max": self._w_depth_max.value,
             "loc_filter": self._chk_loc_filter.value,
             "sample_lat": self._w_sample_lat.value,
             "sample_lon": self._w_sample_lon.value,
             "sample_radius": self._w_sample_radius.value,
-            "variables": list(self.variables),
-            "colormap": self.colormap,
-            "samples_csv_path": self._samples_csv_path,
+            "sample_var_map": self._sample_var_map,
         }
 
     def _restore_non_cascade_settings(self) -> None:
@@ -2028,13 +2152,13 @@ class OOIDashboard(param.Parameterized):
         if cmap in _CMAPS:
             self.colormap = cmap
         # Restore var maps before reloading limits so saved mappings survive
-        self._var_map = cfg.get("var_map", {})
+        self._var_map = cfg.get("qartod_var_map", {})
         self._sample_var_map = cfg.get("sample_var_map", {})
         # Gross range
         gr_path = cfg.get("gross_range_path", "")
         if gr_path and Path(gr_path).exists():
             self.gross_range_path = gr_path
-            self._w_gr_path_display.value = gr_path
+            self._w_gr_path_display.value = os.path.basename(gr_path)
             self._load_gross_range()
         # Climatology
         clim_paths = [p for p in cfg.get("clim_paths", []) if Path(p).exists()]
@@ -2042,7 +2166,7 @@ class OOIDashboard(param.Parameterized):
             self._clim_paths = clim_paths
             n = len(clim_paths)
             self._w_clim_path_display.value = (
-                f"{n} file{'s' if n > 1 else ''} selected"
+                os.path.basename(clim_paths[0]) if n == 1 else f"{n} files selected"
             )
             self._load_climatology()
         # Local data file -- autoload so variables can be restored and plots fire
@@ -2050,7 +2174,7 @@ class OOIDashboard(param.Parameterized):
         dp = cfg.get("data_path", "")
         if dp and Path(dp).exists():
             self.data_path = dp
-            self._w_data_path_display.value = dp
+            self._w_data_path_display.value = os.path.basename(dp)
             self._load_from_file()
             # _populate_variables() ran inside _load_from_file; now apply saved selection
             valid_vars = [v for v in saved_vars if v in self.param["variables"].objects]
@@ -2059,12 +2183,12 @@ class OOIDashboard(param.Parameterized):
         elif dp:
             # Path saved but file not found -- just restore the display
             self.data_path = dp
-            self._w_data_path_display.value = dp
+            self._w_data_path_display.value = os.path.basename(dp)
         # Discrete samples CSV -- prefer saved file over re-fetching
         sc_path = cfg.get("samples_csv_path", "")
         if sc_path and Path(sc_path).exists():
             self._samples_csv_path = sc_path
-            self._w_samples_path_display.value = sc_path
+            self._w_samples_path_display.value = os.path.basename(sc_path)
             self._load_samples_from_file()
         # Sample arrays (used when fetching fresh; preserve for reference)
         saved_arrays = [
@@ -2079,6 +2203,20 @@ class OOIDashboard(param.Parameterized):
         self._w_sample_lat.value = float(cfg.get("sample_lat", 0.0))
         self._w_sample_lon.value = float(cfg.get("sample_lon", 0.0))
         self._w_sample_radius.value = float(cfg.get("sample_radius", 5.0))
+        # Column range for 2D timeseries
+        self.col_start = int(cfg.get("col_start", 0))
+        self._w_col_start.value = self.col_start
+        self.col_stride = max(1, int(cfg.get("col_stride", 1)))
+        self._w_col_stride.value = self.col_stride
+        self.col_stop = int(cfg.get("col_stop", -1))
+        self._w_col_stop.value = self.col_stop
+        # File tag regex -- overrides the auto-fill from _on_deployment
+        self._w_tag.value = cfg.get("file_regex", self._w_tag.value)
+        # Theme preference (applied at next launch via __main__)
+        theme = cfg.get("theme", "default")
+        if theme in ("default", "dark"):
+            self._theme_pref = theme
+            self._w_theme.value = theme
         # Autoload draft annotations if one exists
         if DRAFT_PATH.exists():
             self._load_draft()
@@ -2094,7 +2232,7 @@ class OOIDashboard(param.Parameterized):
         self._cfg = cfg
         self._loading_config = True
         self._current_config_path = path
-        self._w_config_path_display.value = path
+        self._w_config_path_display.value = os.path.basename(path)
         LAST_CONFIG_PATH_FILE.parent.mkdir(parents=True, exist_ok=True)
         LAST_CONFIG_PATH_FILE.write_text(path)
         saved_site = cfg.get("site")
@@ -2149,12 +2287,60 @@ class OOIDashboard(param.Parameterized):
             with open(path, "w") as f:
                 json.dump(self._build_config_dict(), f, indent=2)
             self._current_config_path = path
-            self._w_config_path_display.value = path
+            self._w_config_path_display.value = os.path.basename(path)
             LAST_CONFIG_PATH_FILE.parent.mkdir(parents=True, exist_ok=True)
             LAST_CONFIG_PATH_FILE.write_text(path)
             self._set_status(f"Config saved to {path}.", "success")
         except Exception as e:
             self._set_status(f"Config save failed: {e}", "danger")
+
+    def _reset_dashboard(self, event=None) -> None:
+        """Reset all dashboard state to defaults."""
+        # Data
+        self._data = {}
+        self.data_path = ""
+        self._w_data_path_display.value = ""
+        self._append_path = ""
+        self._w_append_path_display.value = ""
+        # QARTOD limits
+        self._gross_range = None
+        self.gross_range_path = ""
+        self._w_gr_path_display.value = ""
+        self._climatologies = {}
+        self._clim_paths = []
+        self._w_clim_path_display.value = ""
+        self._var_map = {}
+        self._var_map_container.objects = []
+        self._var_map_container.visible = False
+        # Variables
+        self.param["variables"].objects = []
+        self.variables = []
+        # Discrete samples
+        self._samples = None
+        self._samples_raw = None
+        self._samples_csv_path = ""
+        self._w_samples_path_display.value = ""
+        self._sample_var_map = {}
+        self._sample_var_map_container.objects = []
+        self._sample_var_map_container.visible = False
+        # Annotations
+        self._anno_df = pd.DataFrame(columns=_ANNO_COLS)
+        self._deleted_ids = set()
+        self._anno_table.value = self._anno_df
+        self._annotation_mode = False
+        self._btn_annotate.value = False
+        self._tap_clicks = []
+        # Config
+        self._cfg = {}
+        self._loading_config = False
+        self._current_config_path = ""
+        self._w_config_path_display.value = ""
+        # Cascade reset -- _on_site handles None and sets status "Ready."
+        self.site = None
+        # Force plot/annotation refresh; override "Ready." with final message
+        self._data_gen += 1
+        self._anno_gen += 1
+        self._set_status("Dashboard reset.", "info")
 
     def _load_draft(self, event=None) -> None:
         """Reload annotation table from the last saved draft."""
@@ -2212,7 +2398,7 @@ class OOIDashboard(param.Parameterized):
     # ------------------------------------------------------------------
 
     def _build_sidebar(self) -> pn.Column:
-        refdes_section = pn.Column(
+        select_data_section = pn.Column(
             self._w_site,
             self._w_node,
             self._w_sensor,
@@ -2221,17 +2407,16 @@ class OOIDashboard(param.Parameterized):
             self._w_deploy,
             self._w_tag,
             self._btn_m2m,
-        )
-        files_section = pn.Column(
+            pn.layout.Divider(),
             pn.pane.Markdown("**Data file (.nc)**"),
-            pn.Row(self._w_data_path_display, self._btn_file),
+            self._w_data_path_display,
+            pn.Row(self._btn_file, self._btn_save_data),
             pn.layout.Divider(),
             pn.pane.Markdown("**Append data (.nc)**"),
-            pn.Row(self._w_append_path_display, self._btn_append_file),
-            pn.layout.Divider(),
-            pn.pane.Markdown("**Save loaded data (.nc)**"),
-            self._btn_save_data,
-            pn.layout.Divider(),
+            self._w_append_path_display,
+            self._btn_append_file,
+        )
+        qartod_section = pn.Column(
             pn.pane.Markdown("**Gross Range (.csv)**"),
             pn.Row(self._w_gr_path_display, self._btn_load_gr),
             pn.layout.Divider(),
@@ -2239,7 +2424,7 @@ class OOIDashboard(param.Parameterized):
             pn.Row(self._w_clim_path_display, self._btn_load_clim),
             pn.layout.Divider(),
             pn.pane.Markdown("**Variable Mapping**"),
-            self._w_var_map,
+            self._var_map_container,
         )
         display_section = pn.Column(
             self._w_plot_type,
@@ -2247,7 +2432,9 @@ class OOIDashboard(param.Parameterized):
             pn.Row(self._btn_var_all, self._btn_var_none),
             self._w_variables,
             self._w_color_var,
+            self._w_y_dim,
             self._w_normalize,
+            self._col_range_section,
             self._w_colormap,
         )
         samples_section = pn.Column(
@@ -2256,8 +2443,8 @@ class OOIDashboard(param.Parameterized):
             self._btn_fetch_samples,
             pn.layout.Divider(),
             pn.pane.Markdown("**Or load from CSV**"),
-            pn.Row(self._w_samples_path_display, self._btn_load_samples_csv),
-            self._btn_save_samples_csv,
+            self._w_samples_path_display,
+            pn.Row(self._btn_load_samples_csv, self._btn_save_samples_csv),
             pn.layout.Divider(),
             pn.pane.Markdown("**Depth Filter**"),
             pn.Row(self._w_depth_min, self._w_depth_max),
@@ -2279,19 +2466,24 @@ class OOIDashboard(param.Parameterized):
         config_section = pn.Column(
             pn.Row(self._w_config_path_display),
             pn.Row(self._btn_load_config, self._btn_save_config),
+            pn.layout.Divider(),
+            pn.pane.Markdown("**Theme** (applies on next launch)"),
+            self._w_theme,
         )
         return pn.Column(
+            pn.Row(self._spinner, self._status),
+            pn.layout.Divider(),
             pn.Accordion(
-                ("Reference Designator", refdes_section),
-                ("Local Files", files_section),
+                ("Select Data", select_data_section),
                 ("Variables & Display", display_section),
+                ("QARTOD", qartod_section),
                 ("Discrete Samples", samples_section),
                 ("Annotations", anno_section),
                 ("Configuration", config_section),
-                active=[0],
+                active=[],
             ),
             pn.layout.Divider(),
-            pn.Row(self._spinner, self._status),
+            self._btn_reset,
         )
 
     def _on_annotate_toggle(self, event) -> None:
@@ -2390,19 +2582,35 @@ class OOIDashboard(param.Parameterized):
     def servable(self) -> pn.template.FastListTemplate:
         """Assemble and return the Panel template for serving."""
         return pn.template.FastListTemplate(
-            title="Data Reviews",
+            title="OOI Data Quality Reviews",
             sidebar=[self._build_sidebar()],
             main=[self._build_main()],
             sidebar_width=360,
             accent_base_color="#1976d2",
             header_background="#1976d2",
+            theme=self._theme_pref,
         )
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Launch the OOI HITL QC dashboard."""
+    if LAST_CONFIG_PATH_FILE.exists():
+        try:
+            _last = LAST_CONFIG_PATH_FILE.read_text().strip()
+            if _last and Path(_last).exists():
+                with open(_last) as _f:
+                    _theme = json.load(_f).get("theme", "default")
+                if _theme in ("default", "dark"):
+                    pn.config.theme = _theme
+        except Exception:
+            pass
     pn.serve(
         {"dashboard": lambda: OOIDashboard().servable()},
         port=5006,
         show=True,
         autoreload=False,
     )
+
+
+if __name__ == "__main__":
+    main()

@@ -112,6 +112,9 @@ all = [
     "ooi_data_explorations[jupyter,extended,dashboard,dev]",
 ]
 
+[project.scripts]
+ooi-dashboard = "ooi_data_explorations.apps.dashboard:main"
+
 [tool.hatch.version]
 path = "version.py"
 
