@@ -2,15 +2,19 @@
 # -*- coding: utf-8 -*-
 """
 @author Christopher Wingard
-@brief Panel-based interactive dashboard for HITL review of QARTOD test
-    limits and annotations for OOI data. Run with:
+@brief Panel-based interactive dashboard for HITL review of OOI data,
+    associated QARTOD test limits, discrete samples, and annotations
+    (with the ability to create and edit annotations). Run with:
 
         ooi-dashboard
 """
 import ast
+import base64
 import json
 import operator
 import os
+import time
+from contextlib import contextmanager
 from functools import reduce
 from pathlib import Path
 
@@ -19,6 +23,7 @@ import pandas as pd
 import panel as pn
 import param
 import xarray as xr
+from loguru import logger
 from bokeh.models import BoxAnnotation, ColumnDataSource, CustomJS, Span, TapTool
 from bokeh.models import Line as BokehLine
 from bokeh.plotting import figure as BokehFigure
@@ -58,8 +63,14 @@ except ImportError:
 pn.extension("tabulator", sizing_mode="stretch_width")
 
 LAST_CONFIG_PATH_FILE = Path.home() / ".ooidata" / "last_config_path.txt"
-DRAFT_PATH = Path.home() / ".ooidata" / "dashboard_draft.json"
 EXPORT_DIR = Path.home() / "ooidata"
+DEBUG: bool = False  # set True to enable timing logs at DEBUG level
+
+_LOGO_PATH = Path(__file__).parent / "ooi-logo.png"
+_LOGO_B64: str = (
+    base64.b64encode(_LOGO_PATH.read_bytes()).decode()
+    if _LOGO_PATH.exists() else ""
+)
 
 _CASCADE_ORDER = ("node", "sensor", "method", "stream")
 
@@ -145,6 +156,14 @@ _PLOT_COLORS: dict[str, dict[str, str]] = {
 def _is_nested_span(span: list | None) -> bool:
     """Return True if span is a list of per-channel [lo, hi] pairs, not a flat [lo, hi]."""
     return bool(span and isinstance(span[0], (list, tuple)))
+
+
+@contextmanager
+def _timed(label: str):
+    """Log elapsed wall-clock time for a code block at DEBUG level."""
+    t0 = time.perf_counter()
+    yield
+    logger.debug("TIMER | {:40s} | {:.3f}s", label, time.perf_counter() - t0)
 
 
 def _theme_colors() -> dict[str, str]:
@@ -279,6 +298,7 @@ class OOIDashboard(param.Parameterized):
     variables = param.ListSelector(default=[], objects=[])
     plot_type = param.Selector(default="timeseries", objects=["timeseries", "heatmap"])
     normalize = param.Boolean(default=False)
+    show_qartod_flags = param.Boolean(default=False)
     color_var = param.Selector(default=None, objects=[None])
     y_dim = param.Selector(default=None, objects=[None])
     colormap = param.Selector(default=_DEFAULT_CMAP, objects=_CMAPS)
@@ -307,6 +327,7 @@ class OOIDashboard(param.Parameterized):
         self._append_path: str = ""
         self._anno_df: pd.DataFrame = pd.DataFrame(columns=_ANNO_COLS)
         self._deleted_ids: set[int] = set()
+        self._anno_del_path: str = ""
         self._annotation_mode: bool = False
         self._tap_clicks: list[float] = []
         self._tap_source = ColumnDataSource(data={"x": [0.0]})
@@ -378,10 +399,10 @@ class OOIDashboard(param.Parameterized):
 
         # -- Gap detection controls --
         self._w_gap_threshold = pn.widgets.FloatInput(
-            name="Min gap (hours)", value=72.0, step=1.0, width=160
+            name="", value=72.0, step=1.0, width=75
         )
         self._btn_find_gaps = pn.widgets.Button(
-            name="Find Gaps", button_type="default"
+            name="Find Gaps", button_type="default", width=140
         )
         self._btn_find_gaps.on_click(self._find_gaps)
 
@@ -405,6 +426,13 @@ class OOIDashboard(param.Parameterized):
         )
         self._w_normalize.param.watch(
             lambda e: setattr(self, "normalize", e.new), "value"
+        )
+        self._w_show_qartod = pn.widgets.Checkbox(
+            name="Show QARTOD flags",
+            value=self.show_qartod_flags,
+        )
+        self._w_show_qartod.param.watch(
+            lambda e: setattr(self, "show_qartod_flags", e.new), "value"
         )
         self._w_color_var = pn.widgets.Select.from_param(
             self.param.color_var, name="Color Variable"
@@ -545,11 +573,11 @@ class OOIDashboard(param.Parameterized):
 
         # -- Buttons: annotations --
         self._btn_fetch_anno = pn.widgets.Button(
-            name="Fetch annotations", button_type="primary"
+            name="Fetch annotations", button_type="primary", width=140
         )
         self._btn_fetch_anno.on_click(self._fetch_annotations)
         self._btn_load_anno_csv = pn.widgets.Button(
-            name="Load from CSV", button_type="primary"
+            name="Load CSV", button_type="primary", width=110
         )
         self._btn_load_anno_csv.on_click(self._load_annotations_csv)
         self._btn_add_anno = pn.widgets.Button(
@@ -560,14 +588,12 @@ class OOIDashboard(param.Parameterized):
             name="Mark Deleted", button_type="warning", width=110
         )
         self._btn_del_anno.on_click(self._mark_anno_deleted)
-        self._btn_save_draft = pn.widgets.Button(
-            name="Save Draft", button_type="default", width=95
+        self._w_anno_path_display = pn.widgets.TextInput(
+            name="",
+            placeholder="No annotation CSV selected",
+            disabled=True,
+            width=350,
         )
-        self._btn_save_draft.on_click(self._save_draft)
-        self._btn_load_draft = pn.widgets.Button(
-            name="Load Draft", button_type="default", width=95
-        )
-        self._btn_load_draft.on_click(self._load_draft)
         self._btn_export_anno = pn.widgets.Button(
             name="Export CSV", button_type="primary", width=95
         )
@@ -812,10 +838,11 @@ class OOIDashboard(param.Parameterized):
             f"Loading {catalog_id} (deployment: {self.deployment})...", "info"
         )
         try:
-            ds = load_gc_thredds(
-                self.site, self.node, self.sensor,
-                self.method, self.stream, tag,
-            )
+            with _timed("load_gc_thredds"):
+                ds = load_gc_thredds(
+                    self.site, self.node, self.sensor,
+                    self.method, self.stream, tag,
+                )
             if ds is None or len(ds.data_vars) == 0:
                 self._set_status(
                     f"No files matched for {catalog_id} "
@@ -826,7 +853,8 @@ class OOIDashboard(param.Parameterized):
                 return
 
             self._data = {self.method: ds}
-            self._populate_variables()
+            with _timed("_populate_variables (m2m)"):
+                self._populate_variables()
             self._data_gen += 1
             t0 = pd.Timestamp(ds.time.values[0]).strftime("%Y-%m-%d")
             t1 = pd.Timestamp(ds.time.values[-1]).strftime("%Y-%m-%d")
@@ -857,8 +885,10 @@ class OOIDashboard(param.Parameterized):
             return
         self._set_busy(True)
         try:
-            self._data = {"file": xr.open_dataset(path)}
-            self._populate_variables()
+            with _timed("xr.open_dataset"):
+                self._data = {"file": xr.open_dataset(path)}
+            with _timed("_populate_variables (file)"):
+                self._populate_variables()
             self._data_gen += 1
             self._set_status(f"Loaded {os.path.basename(path)}.", "success")
         except Exception as e:
@@ -1496,6 +1526,63 @@ class OOIDashboard(param.Parameterized):
         finally:
             self._set_busy(False)
 
+    def _apply_anno_csv(self, path: str) -> bool:
+        """
+        Load annotations from CSV at path. After loading, apply any known
+        deletion IDs: checks self._anno_del_path first, then falls back to
+        annotation_deletions.txt in the same directory as the CSV.
+        Returns True on success.
+        """
+        try:
+            raw = pd.read_csv(path)
+            missing = [c for c in ANNO_HEADER if c not in raw.columns]
+            if missing:
+                self._set_status(
+                    f"CSV is missing required columns: {missing}", "warning"
+                )
+                return False
+            for col in ANNO_HEADER:
+                if col not in raw.columns:
+                    raw[col] = None
+            if "deleted" not in raw.columns:
+                raw["deleted"] = False
+            anno = raw[_ANNO_COLS].copy()
+            anno["deleted"] = anno["deleted"].fillna(False).astype(bool)
+            # Resolve deletion ID file: saved path first, sibling fallback
+            del_file = Path(self._anno_del_path) if self._anno_del_path else None
+            if del_file is None or not del_file.exists():
+                sibling = Path(path).parent / "annotation_deletions.txt"
+                if sibling.exists():
+                    del_file = sibling
+            if del_file is not None and del_file.exists():
+                del_ids: set[int] = set()
+                with open(del_file) as f:
+                    for line in f:
+                        stripped = line.strip()
+                        if stripped.isdigit():
+                            del_ids.add(int(stripped))
+                if del_ids and "id" in anno.columns:
+                    mask = anno["id"].apply(
+                        lambda v: pd.notna(v) and str(v).isdigit() and int(v) in del_ids
+                    )
+                    anno.loc[mask, "deleted"] = True
+                self._deleted_ids = del_ids | set(
+                    int(i) for i in anno.loc[anno["deleted"], "id"].dropna()
+                )
+            else:
+                self._deleted_ids = set(
+                    int(i) for i in anno.loc[anno["deleted"], "id"].dropna()
+                )
+            self._anno_df = anno
+            self._anno_table.value = self._anno_df
+            self._anno_table.editors = self._anno_editors()
+            self._anno_gen += 1
+            self._w_anno_path_display.value = path
+            return True
+        except Exception as e:
+            self._set_status(f"Annotation CSV load failed: {e}", "danger")
+            return False
+
     def _load_annotations_csv(self, event=None) -> None:
         """Load annotations from a previously exported CSV file."""
         path = _browse_file(
@@ -1504,31 +1591,10 @@ class OOIDashboard(param.Parameterized):
         )
         if not path:
             return
-        try:
-            raw = pd.read_csv(path)
-            missing = [c for c in ANNO_HEADER if c not in raw.columns]
-            if missing:
-                self._set_status(
-                    f"CSV is missing required columns: {missing}", "warning"
-                )
-                return
-            for col in ANNO_HEADER:
-                if col not in raw.columns:
-                    raw[col] = None
-            if "deleted" not in raw.columns:
-                raw["deleted"] = False
-            anno = raw[_ANNO_COLS].copy()
-            anno["deleted"] = anno["deleted"].fillna(False).astype(bool)
-            self._anno_df = anno
-            self._deleted_ids = set(
-                int(i) for i in anno.loc[anno["deleted"], "id"].dropna()
+        if self._apply_anno_csv(path):
+            self._set_status(
+                f"{len(self._anno_df)} annotations loaded from CSV.", "success"
             )
-            self._anno_table.value = self._anno_df
-            self._anno_table.editors = self._anno_editors()
-            self._anno_gen += 1
-            self._set_status(f"{len(anno)} annotations loaded from CSV.", "success")
-        except Exception as e:
-            self._set_status(f"Annotation CSV load failed: {e}", "danger")
 
     @staticmethod
     def _anno_editors() -> dict:
@@ -1587,29 +1653,24 @@ class OOIDashboard(param.Parameterized):
         self._anno_table.value = self._anno_df
         self._anno_gen += 1
 
-    def _save_draft(self, event=None) -> None:
-        """Persist current annotation table and deletion IDs to a draft JSON."""
-        if self._anno_df.empty:
-            self._set_status("No annotations to save.", "warning")
-            return
-        DRAFT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        draft = {
-            "annotations": self._anno_df.to_dict(orient="records"),
-            "deleted_ids": sorted(self._deleted_ids),
-        }
-        with open(DRAFT_PATH, "w") as f:
-            json.dump(draft, f, indent=2, default=str)
-        self._set_status(f"Draft saved to {DRAFT_PATH}.", "success")
-
     def _export_annotations(self, event=None) -> None:
         """Export added/modified annotations (non-deleted rows) to CSV."""
         if self._anno_df.empty:
             self._set_status("No annotations to export.", "warning")
             return
-        EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+        out_path = _browse_save_file(
+            title="Save annotation CSV",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            default_ext=".csv",
+            initial_dir=str(EXPORT_DIR),
+            initial_file="annotations_export.csv",
+        )
+        if not out_path:
+            return
         out = self._anno_df[~self._anno_df["deleted"]][ANNO_HEADER]
-        out_path = EXPORT_DIR / "annotations_export.csv"
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         out.to_csv(out_path, index=False)
+        self._w_anno_path_display.value = out_path
         self._set_status(f"Annotations exported to {out_path}.", "success")
 
     def _export_deletes(self, event=None) -> None:
@@ -1617,10 +1678,19 @@ class OOIDashboard(param.Parameterized):
         if not self._deleted_ids:
             self._set_status("No rows marked for deletion.", "warning")
             return
-        EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-        out_path = EXPORT_DIR / "annotation_deletions.txt"
+        out_path = _browse_save_file(
+            title="Save deletion ID list",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            default_ext=".txt",
+            initial_dir=str(EXPORT_DIR),
+            initial_file="annotation_deletions.txt",
+        )
+        if not out_path:
+            return
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w") as f:
             f.write("\n".join(str(i) for i in sorted(self._deleted_ids)))
+        self._anno_del_path = out_path
         self._set_status(
             f"{len(self._deleted_ids)} deletion IDs exported to {out_path}.",
             "success",
@@ -1631,8 +1701,9 @@ class OOIDashboard(param.Parameterized):
     # ------------------------------------------------------------------
 
     @param.depends(
-        "variables", "plot_type", "normalize", "color_var", "y_dim", "colormap",
-        "col_start", "col_stride", "col_stop", "_data_gen", "_anno_gen",
+        "variables", "plot_type", "normalize", "show_qartod_flags", "color_var",
+        "y_dim", "colormap", "col_start", "col_stride", "col_stop",
+        "_data_gen", "_anno_gen",
     )
     def _plot_view(self):
         if not _HAS_HVPLOT:
@@ -1666,9 +1737,10 @@ class OOIDashboard(param.Parameterized):
             "not_operational": "#00bcd4",
             "not_available": "#2196f3",
         }
-        _QC_COLORS = {3: "#f1c40f", 4: "#e74c3c"}
+
 
         def hook(plot, element):
+            _t_hook = time.perf_counter()
             bokeh_plot = plot.handles["plot"]
 
             if not self._anno_df.empty:
@@ -1701,33 +1773,12 @@ class OOIDashboard(param.Parameterized):
                 )
 
             if var is None or not self._data:
+                logger.debug(
+                    "TIMER | {:<40s} | {:.3f}s",
+                    f"annotation_hook[annotations only]",
+                    time.perf_counter() - _t_hook,
+                )
                 return
-            for _, ds in self._data.items():
-                qartod_var = f"{var}_qartod_results"
-                if qartod_var not in ds:
-                    continue
-                times = ds["time"].values
-                flags = ds[qartod_var].values
-                for flag_val, color in _QC_COLORS.items():
-                    mask = (flags == flag_val)
-                    if not mask.any():
-                        continue
-                    padded = np.concatenate([[False], mask, [False]])
-                    diffs = np.diff(padded.astype(np.int8))
-                    starts = np.where(diffs == 1)[0]
-                    ends = np.where(diffs == -1)[0]
-                    for s, e in zip(starts, ends):
-                        t_start = pd.Timestamp(times[s]).timestamp() * 1000
-                        t_end = pd.Timestamp(
-                            times[min(e, len(times) - 1)]
-                        ).timestamp() * 1000
-                        bokeh_plot.add_layout(BoxAnnotation(
-                            left=t_start, right=t_end,
-                            fill_color=color, fill_alpha=0.2,
-                            line_color=None,
-                        ))
-                break  # use first dataset that has the QARTOD variable
-
             # --- Gross range limit lines (Span; does not affect y-axis auto-range) ---
             if (
                 self._gross_range is not None
@@ -1763,39 +1814,49 @@ class OOIDashboard(param.Parameterized):
                 self._climatologies.get(var),
             )
             if clim_df is not None:
-                zero_rows = [idx for idx in clim_df.index if list(idx) == [0, 0]]
-                if zero_rows:
-                    clim_row = clim_df.loc[zero_rows[0]]
-                    for _, ds in self._data.items():
-                        if var not in ds:
-                            continue
-                        times = pd.DatetimeIndex(ds["time"].values)
-                        times_ms = [
-                            pd.Timestamp(t).timestamp() * 1000 for t in times
-                        ]
-                        months = times.month
-                        clim_mins: list[float] = []
-                        clim_maxs: list[float] = []
-                        for m in months:
-                            matched = False
-                            for col_span, val in clim_row.items():
-                                if col_span[0] <= m <= col_span[1]:
-                                    clim_mins.append(float(val[0]))
-                                    clim_maxs.append(float(val[1]))
-                                    matched = True
-                                    break
-                            if not matched:
-                                clim_mins.append(float("nan"))
-                                clim_maxs.append(float("nan"))
-                        for yvals in (clim_mins, clim_maxs):
-                            src = ColumnDataSource({"x": times_ms, "y": yvals})
-                            bokeh_plot.add_glyph(src, BokehLine(
-                                x="x", y="y",
-                                line_color=_theme_colors()["clim_line"],
-                                line_dash="dotted",
-                                line_width=1.25,
-                            ))
-                        break  # use first dataset only
+                # Per-channel tables (non-[0,0] rows) don't map to a single y-value;
+                # the limit scatter already marks out-of-range points per channel.
+                is_multichan = any(list(idx) != [0, 0] for idx in clim_df.index)
+                if not is_multichan:
+                    zero_rows = [idx for idx in clim_df.index if list(idx) == [0, 0]]
+                    if zero_rows:
+                        clim_row = clim_df.loc[zero_rows[0]]
+                        for _, ds in self._data.items():
+                            if var not in ds:
+                                continue
+                            times = pd.DatetimeIndex(ds["time"].values)
+                            times_ms = [
+                                pd.Timestamp(t).timestamp() * 1000 for t in times
+                            ]
+                            months = times.month
+                            clim_mins: list[float] = []
+                            clim_maxs: list[float] = []
+                            for m in months:
+                                matched = False
+                                for col_span, val in clim_row.items():
+                                    if col_span[0] <= m <= col_span[1]:
+                                        clim_mins.append(float(val[0]))
+                                        clim_maxs.append(float(val[1]))
+                                        matched = True
+                                        break
+                                if not matched:
+                                    clim_mins.append(float("nan"))
+                                    clim_maxs.append(float("nan"))
+                            for yvals in (clim_mins, clim_maxs):
+                                src = ColumnDataSource({"x": times_ms, "y": yvals})
+                                bokeh_plot.add_glyph(src, BokehLine(
+                                    x="x", y="y",
+                                    line_color=_theme_colors()["clim_line"],
+                                    line_dash="dotted",
+                                    line_width=1.25,
+                                ))
+                            break  # use first dataset only
+
+            logger.debug(
+                "TIMER | {:<40s} | {:.3f}s",
+                f"annotation_hook total({var})",
+                time.perf_counter() - _t_hook,
+            )
 
         return hook
 
@@ -1886,18 +1947,24 @@ class OOIDashboard(param.Parameterized):
             if not curves:
                 continue
 
-            for sc in self._build_limit_scatter(var):
-                curves.append(sc)
+            with _timed(f"build_limit_scatter({var})"):
+                for sc in self._build_limit_scatter(var):
+                    curves.append(sc)
+
+            if self.show_qartod_flags:
+                for sc in self._build_qartod_scatter(var):
+                    curves.append(sc)
 
             if not is_2d:
                 for sc in self._build_sample_scatter(var):
                     curves.append(sc)
 
-            subplot = reduce(operator.mul, curves).opts(
-                show_legend=is_2d or multi_method,
-                legend_position="bottom_right",
-                hooks=[self._make_annotation_hook(var)],
-            )
+            with _timed(f"subplot_reduce({var})"):
+                subplot = reduce(operator.mul, curves).opts(
+                    show_legend=is_2d or multi_method,
+                    legend_position="bottom_right",
+                    hooks=[self._make_annotation_hook(var)],
+                )
             subplots.append(subplot)
 
         if not subplots:
@@ -1996,20 +2063,76 @@ class OOIDashboard(param.Parameterized):
             responsive=True,
             height=400,
             colorbar=True,
-            hooks=[self._make_annotation_hook(None)],
-        )
+        ).opts(hooks=[self._make_annotation_hook(None)])
         return pn.pane.HoloViews(p, sizing_mode="stretch_width")
+
+    def _build_qartod_scatter(self, var: str) -> list:
+        """
+        Return scatter elements for data points flagged suspect (3) or fail (4)
+        by the QARTOD results variable embedded in the dataset.
+        """
+        if not self._data:
+            return []
+        _FLAG_STYLES: dict[int, tuple[str, str]] = {
+            3: ("#f1c40f", "qc_suspect"),
+            4: ("#e74c3c", "qc_fail"),
+        }
+        results: list = []
+        for ds in self._data.values():
+            qnames = self._var_map.get(var, [var])
+            qartod_var = next(
+                (f"{q}_qartod_results" for q in qnames if f"{q}_qartod_results" in ds),
+                f"{var}_qartod_results" if f"{var}_qartod_results" in ds else None,
+            )
+            if qartod_var is None or var not in ds:
+                break
+            times = ds["time"].values
+            flags = ds[qartod_var].values
+            extra_dims = [d for d in ds[var].dims if "time" not in d and d != "obs"]
+            if extra_dims and flags.ndim > 1:
+                dim = extra_dims[0]
+                n = ds.dims[dim]
+                start = max(0, self.col_start)
+                stop = n if self.col_stop < 0 else min(n, self.col_stop + 1)
+                stride = max(1, self.col_stride)
+                for idx in range(start, stop, stride):
+                    if idx >= flags.shape[1]:
+                        continue
+                    chan_flags = flags[:, idx]
+                    chan_vals = ds[var].isel({dim: idx}).values
+                    for flag_val, (color, label) in _FLAG_STYLES.items():
+                        mask = chan_flags == flag_val
+                        if not mask.any():
+                            continue
+                        df = pd.DataFrame({"time": times[mask], var: chan_vals[mask]})
+                        results.append(df.hvplot.scatter(
+                            x="time", y=var, color=color, alpha=0.5, size=6, label=label,
+                        ))
+            else:
+                if flags.ndim > 1:
+                    flags = flags.max(axis=tuple(range(1, flags.ndim)))
+                vals = ds[var].values
+                for flag_val, (color, label) in _FLAG_STYLES.items():
+                    mask = flags == flag_val
+                    if not mask.any():
+                        continue
+                    df = pd.DataFrame({"time": times[mask], var: vals[mask]})
+                    results.append(df.hvplot.scatter(
+                        x="time", y=var, color=color, alpha=0.5, size=6, label=label,
+                    ))
+            break  # use first dataset
+        return results
 
     def _build_limit_scatter(self, var: str) -> list:
         """
-        Return up to two hvplot scatter elements (suspect=yellow, fail=red)
+        Return up to two hvplot scatter elements (suspect=orange, fail=red)
         for data points outside gross range or climatology limits for var.
+        Dispatches to a numpy 2D path or a pandas 1D path based on variable shape.
         """
         if not self._data:
             return []
 
         qnames = self._var_map.get(var, [var])
-
         gr_row = None
         if self._gross_range is not None and "_var" in self._gross_range.columns:
             matches = self._gross_range[self._gross_range["_var"].isin(qnames)]
@@ -2020,16 +2143,131 @@ class OOIDashboard(param.Parameterized):
             (self._climatologies[q] for q in qnames if q in self._climatologies),
             self._climatologies.get(var),
         )
-
         if gr_row is None and clim_df is None:
             return []
 
-        dfs: list[pd.DataFrame] = []
+        dim: str | None = None
         for ds in self._data.values():
-            if var not in ds:
+            if var in ds:
+                extra = [d for d in ds[var].dims if "time" not in d and d != "obs"]
+                if extra:
+                    dim = extra[0]
+                break
+
+        if dim is not None:
+            return self._limit_scatter_2d(var, gr_row, clim_df)
+        return self._limit_scatter_1d(var, gr_row, clim_df)
+
+    def _limit_scatter_2d(self, var: str, gr_row, clim_df) -> list:
+        """
+        Limit scatter for 2D (time x channel) variables. Works entirely in numpy
+        on the raw (n_time, n_chan) array to avoid the cost of to_dataframe().
+        """
+        val_arrays: list[np.ndarray] = []
+        time_arrays: list[np.ndarray] = []
+        for ds in self._data.values():
+            if var in ds:
+                val_arrays.append(ds[var].values)
+                time_arrays.append(ds["time"].values)
+
+        if not val_arrays:
+            return []
+
+        vals = np.concatenate(val_arrays, axis=0) if len(val_arrays) > 1 else val_arrays[0]
+        times = np.concatenate(time_arrays) if len(time_arrays) > 1 else time_arrays[0]
+        n_time, n_chan = vals.shape
+
+        fail_2d = np.zeros((n_time, n_chan), dtype=bool)
+        suspect_2d = np.zeros((n_time, n_chan), dtype=bool)
+
+        _t_gr = time.perf_counter()
+        if gr_row is not None:
+            fail_span: list | None = gr_row.get("_fail_span")
+            suspect_span: list | None = gr_row.get("_suspect_span")
+            if fail_span is not None:
+                if _is_nested_span(fail_span):
+                    lo = np.array([fail_span[i][0] if i < len(fail_span) else np.nan for i in range(n_chan)])
+                    hi = np.array([fail_span[i][1] if i < len(fail_span) else np.nan for i in range(n_chan)])
+                    fail_2d = (vals < lo[np.newaxis, :]) | (vals > hi[np.newaxis, :])
+                else:
+                    fail_2d = (vals < fail_span[0]) | (vals > fail_span[1])
+            if suspect_span is not None:
+                if _is_nested_span(suspect_span):
+                    lo = np.array([suspect_span[i][0] if i < len(suspect_span) else np.nan for i in range(n_chan)])
+                    hi = np.array([suspect_span[i][1] if i < len(suspect_span) else np.nan for i in range(n_chan)])
+                    suspect_2d = ((vals < lo[np.newaxis, :]) | (vals > hi[np.newaxis, :])) & ~fail_2d
+                else:
+                    suspect_2d = ((vals < suspect_span[0]) | (vals > suspect_span[1])) & ~fail_2d
+        logger.debug(
+            "TIMER | {:<40s} | {:.3f}s",
+            f"limit_scatter 2d gross_range({var})",
+            time.perf_counter() - _t_gr,
+        )
+
+        _t_cl = time.perf_counter()
+        if clim_df is not None:
+            months = pd.DatetimeIndex(times).month.to_numpy()
+            is_multichan = any(list(idx) != [0, 0] for idx in clim_df.index)
+            if is_multichan:
+                lo_arr = np.full((n_chan, 13), np.nan)
+                hi_arr = np.full((n_chan, 13), np.nan)
+                for idx in clim_df.index:
+                    lo_idx, hi_idx = list(idx)
+                    clim_row = clim_df.loc[idx]
+                    for col_span, val in clim_row.items():
+                        for pos in range(lo_idx, hi_idx + 1):
+                            for m in range(col_span[0], col_span[1] + 1):
+                                lo_arr[pos, m] = val[0]
+                                hi_arr[pos, m] = val[1]
+                # row_lo[t, c] = lo_arr[c, months[t]] via numpy broadcast
+                chan_idx = np.arange(n_chan)
+                row_lo = lo_arr[chan_idx[np.newaxis, :], months[:, np.newaxis]]
+                row_hi = hi_arr[chan_idx[np.newaxis, :], months[:, np.newaxis]]
+                suspect_2d |= ((vals < row_lo) | (vals > row_hi)) & ~fail_2d
+            else:
+                zero_rows = [idx for idx in clim_df.index if list(idx) == [0, 0]]
+                if zero_rows:
+                    clim_row = clim_df.loc[zero_rows[0]]
+                    lo_1d = np.full(13, np.nan)
+                    hi_1d = np.full(13, np.nan)
+                    for col_span, val in clim_row.items():
+                        for m in range(col_span[0], col_span[1] + 1):
+                            lo_1d[m] = val[0]
+                            hi_1d[m] = val[1]
+                    months = pd.DatetimeIndex(times).month.to_numpy()
+                    row_lo_1d = lo_1d[months]
+                    row_hi_1d = hi_1d[months]
+                    clim_out = (vals < row_lo_1d[:, np.newaxis]) | (vals > row_hi_1d[:, np.newaxis])
+                    suspect_2d |= (clim_out & ~fail_2d)
+        logger.debug(
+            "TIMER | {:<40s} | {:.3f}s",
+            f"limit_scatter 2d climatology({var})",
+            time.perf_counter() - _t_cl,
+        )
+
+        results: list = []
+        for mask_2d, color, label in [
+            (fail_2d, "red", "fail"),
+            (suspect_2d, "orange", "suspect"),
+        ]:
+            t_idx = np.where(mask_2d)[0]
+            if len(t_idx) == 0:
                 continue
-            df = ds[[var]].to_dataframe().reset_index().dropna(subset=[var]).copy()
-            dfs.append(df)
+            df = pd.DataFrame({"time": times[t_idx], var: vals[mask_2d]})
+            results.append(df.hvplot.scatter(
+                x="time", y=var, color=color, alpha=0.6, size=8, label=label,
+            ))
+        return results
+
+    def _limit_scatter_1d(self, var: str, gr_row, clim_df) -> list:
+        """Limit scatter for 1D variables; pandas path."""
+        dfs: list[pd.DataFrame] = []
+        with _timed(f"limit_scatter 1d to_dataframe({var})"):
+            for ds in self._data.values():
+                if var not in ds:
+                    continue
+                df = ds[[var]].to_dataframe().reset_index().dropna(subset=[var]).copy()
+                dfs.append(df)
 
         if not dfs:
             return []
@@ -2038,68 +2276,54 @@ class OOIDashboard(param.Parameterized):
         fail_mask = pd.Series(False, index=all_df.index)
         suspect_mask = pd.Series(False, index=all_df.index)
 
+        _t_gr = time.perf_counter()
         if gr_row is not None:
             fail_span: list | None = gr_row.get("_fail_span")
             suspect_span: list | None = gr_row.get("_suspect_span")
-            extra_cols = [c for c in all_df.columns if c not in ("time", var)]
-            chan_col = extra_cols[0] if extra_cols else None
+            if fail_span is not None and not _is_nested_span(fail_span):
+                fail_mask = (all_df[var] < fail_span[0]) | (all_df[var] > fail_span[1])
+            if suspect_span is not None and not _is_nested_span(suspect_span):
+                suspect_mask = (
+                    (all_df[var] < suspect_span[0]) | (all_df[var] > suspect_span[1])
+                ) & ~fail_mask
+        logger.debug(
+            "TIMER | {:<40s} | {:.3f}s",
+            f"limit_scatter 1d gross_range({var})",
+            time.perf_counter() - _t_gr,
+        )
 
-            if fail_span is not None:
-                if not _is_nested_span(fail_span):
-                    fail_mask = (
-                        (all_df[var] < fail_span[0]) | (all_df[var] > fail_span[1])
-                    )
-                elif chan_col is not None:
-                    for i, chan_val in enumerate(sorted(all_df[chan_col].unique())):
-                        if i >= len(fail_span):
-                            break
-                        lo, hi = fail_span[i]
-                        m = all_df[chan_col] == chan_val
-                        fail_mask |= m & ((all_df[var] < lo) | (all_df[var] > hi))
-            if suspect_span is not None:
-                if not _is_nested_span(suspect_span):
-                    suspect_mask = (
-                        (all_df[var] < suspect_span[0]) | (all_df[var] > suspect_span[1])
-                    ) & ~fail_mask
-                elif chan_col is not None:
-                    for i, chan_val in enumerate(sorted(all_df[chan_col].unique())):
-                        if i >= len(suspect_span):
-                            break
-                        lo, hi = suspect_span[i]
-                        m = all_df[chan_col] == chan_val
-                        suspect_mask |= (
-                            m & ((all_df[var] < lo) | (all_df[var] > hi)) & ~fail_mask
-                        )
-
+        _t_cl = time.perf_counter()
         if clim_df is not None:
+            month_arr = pd.DatetimeIndex(all_df["time"]).month.to_numpy()
             zero_rows = [idx for idx in clim_df.index if list(idx) == [0, 0]]
             if zero_rows:
                 clim_row = clim_df.loc[zero_rows[0]]
-                months = pd.DatetimeIndex(all_df["time"]).month
+                lo_arr = np.full(13, np.nan)
+                hi_arr = np.full(13, np.nan)
                 for col_span, val in clim_row.items():
-                    m_mask = (months >= col_span[0]) & (months <= col_span[1])
-                    out = m_mask & (
-                        (all_df[var] < val[0]) | (all_df[var] > val[1])
-                    )
-                    suspect_mask |= (out & ~fail_mask)
+                    for m in range(col_span[0], col_span[1] + 1):
+                        lo_arr[m] = val[0]
+                        hi_arr[m] = val[1]
+                vals = all_df[var].to_numpy()
+                out = (vals < lo_arr[month_arr]) | (vals > hi_arr[month_arr])
+                suspect_mask |= pd.Series(out, index=all_df.index) & ~fail_mask
+        logger.debug(
+            "TIMER | {:<40s} | {:.3f}s",
+            f"limit_scatter 1d climatology({var})",
+            time.perf_counter() - _t_cl,
+        )
 
         results: list = []
         fail_df = all_df[fail_mask]
         sus_df = all_df[suspect_mask]
         if not fail_df.empty:
-            results.append(
-                fail_df.hvplot.scatter(
-                    x="time", y=var,
-                    color="red", alpha=0.6, size=8, label="fail",
-                )
-            )
+            results.append(fail_df.hvplot.scatter(
+                x="time", y=var, color="red", alpha=0.6, size=8, label="fail",
+            ))
         if not sus_df.empty:
-            results.append(
-                sus_df.hvplot.scatter(
-                    x="time", y=var,
-                    color="orange", alpha=0.6, size=8, label="suspect",
-                )
-            )
+            results.append(sus_df.hvplot.scatter(
+                x="time", y=var, color="orange", alpha=0.6, size=8, label="suspect",
+            ))
         return results
 
     # ------------------------------------------------------------------
@@ -2129,6 +2353,9 @@ class OOIDashboard(param.Parameterized):
             "gross_range_path": self.gross_range_path,
             "clim_paths": self._clim_paths,
             "qartod_var_map": self._var_map,
+            # Annotations
+            "anno_csv_path": self._w_anno_path_display.value,
+            "anno_del_path": self._anno_del_path,
             # Discrete Samples
             "sample_arrays": list(self._w_sample_arrays.value),
             "samples_csv_path": self._samples_csv_path,
@@ -2184,6 +2411,16 @@ class OOIDashboard(param.Parameterized):
             # Path saved but file not found -- just restore the display
             self.data_path = dp
             self._w_data_path_display.value = os.path.basename(dp)
+        # Annotations -- restore deletion path first so _apply_anno_csv can use it
+        self._anno_del_path = cfg.get("anno_del_path", "")
+        anno_path = cfg.get("anno_csv_path", "")
+        if anno_path and Path(anno_path).exists():
+            if self._apply_anno_csv(anno_path):
+                self._set_status(
+                    f"{len(self._anno_df)} annotations restored from CSV.", "success"
+                )
+        elif anno_path:
+            self._w_anno_path_display.value = anno_path
         # Discrete samples CSV -- prefer saved file over re-fetching
         sc_path = cfg.get("samples_csv_path", "")
         if sc_path and Path(sc_path).exists():
@@ -2217,10 +2454,6 @@ class OOIDashboard(param.Parameterized):
         if theme in ("default", "dark"):
             self._theme_pref = theme
             self._w_theme.value = theme
-        # Autoload draft annotations if one exists
-        if DRAFT_PATH.exists():
-            self._load_draft()
-
     def _load_config_from_path(self, path: str) -> None:
         """Parse a config JSON and trigger the cascade to restore full state."""
         try:
@@ -2326,6 +2559,8 @@ class OOIDashboard(param.Parameterized):
         # Annotations
         self._anno_df = pd.DataFrame(columns=_ANNO_COLS)
         self._deleted_ids = set()
+        self._anno_del_path = ""
+        self._w_anno_path_display.value = ""
         self._anno_table.value = self._anno_df
         self._annotation_mode = False
         self._btn_annotate.value = False
@@ -2341,45 +2576,6 @@ class OOIDashboard(param.Parameterized):
         self._data_gen += 1
         self._anno_gen += 1
         self._set_status("Dashboard reset.", "info")
-
-    def _load_draft(self, event=None) -> None:
-        """Reload annotation table from the last saved draft."""
-        if not DRAFT_PATH.exists():
-            self._set_status("No draft file found.", "warning")
-            return
-        try:
-            with open(DRAFT_PATH) as f:
-                draft = json.load(f)
-            anno = pd.DataFrame(draft.get("annotations", []))
-            if anno.empty:
-                self._set_status("Draft is empty.", "warning")
-                return
-            if "deleted" not in anno.columns:
-                anno["deleted"] = False
-            anno["deleted"] = anno["deleted"].fillna(False).astype(bool)
-            # Warn on refdes mismatch but don't block
-            if self.site and "subsite" in anno.columns:
-                draft_site = anno["subsite"].dropna()
-                if not draft_site.empty and draft_site.iloc[0] != self.site:
-                    self._set_status(
-                        f"Warning: draft is for '{draft_site.iloc[0]}', "
-                        f"current site is '{self.site}'. Loading anyway.",
-                        "warning",
-                    )
-            for col in ANNO_HEADER:
-                if col not in anno.columns:
-                    anno[col] = None
-            anno = anno[_ANNO_COLS].copy()
-            self._anno_df = anno
-            self._deleted_ids = set(
-                int(i) for i in anno.loc[anno["deleted"], "id"].dropna()
-            )
-            self._anno_table.value = self._anno_df
-            self._anno_table.editors = self._anno_editors()
-            self._anno_gen += 1
-            self._set_status(f"{len(anno)} annotations loaded from draft.", "success")
-        except Exception as e:
-            self._set_status(f"Draft load failed: {e}", "danger")
 
     # ------------------------------------------------------------------
     # UI helpers
@@ -2434,6 +2630,7 @@ class OOIDashboard(param.Parameterized):
             self._w_color_var,
             self._w_y_dim,
             self._w_normalize,
+            self._w_show_qartod,
             self._col_range_section,
             self._w_colormap,
         )
@@ -2457,12 +2654,6 @@ class OOIDashboard(param.Parameterized):
             pn.pane.Markdown("**Variable Mapping**"),
             self._sample_var_map_container,
         )
-        anno_section = pn.Column(
-            pn.Row(self._btn_fetch_anno, self._btn_load_anno_csv),
-            pn.layout.Divider(),
-            pn.pane.Markdown("**Find Data Gaps**"),
-            pn.Row(self._w_gap_threshold, self._btn_find_gaps),
-        )
         config_section = pn.Column(
             pn.Row(self._w_config_path_display),
             pn.Row(self._btn_load_config, self._btn_save_config),
@@ -2478,12 +2669,27 @@ class OOIDashboard(param.Parameterized):
                 ("Variables & Display", display_section),
                 ("QARTOD", qartod_section),
                 ("Discrete Samples", samples_section),
-                ("Annotations", anno_section),
                 ("Configuration", config_section),
                 active=[],
             ),
             pn.layout.Divider(),
             self._btn_reset,
+            pn.layout.Divider(),
+            pn.pane.HTML(
+                (
+                    "<div style='text-align:center; padding:6px 0;'>"
+                    + (
+                        f"<img src='data:image/png;base64,{_LOGO_B64}' "
+                        "style='width:225px; margin-bottom:6px;'/><br>"
+                        if _LOGO_B64 else ""
+                    )
+                    + "<span style='font-size:1em; color:#888;'>"
+                    "Designed and implemented by<br>"
+                    "Christopher Wingard with Claude (Anthropic)"
+                    "</span></div>"
+                ),
+                sizing_mode="stretch_width",
+            ),
         )
 
     def _on_annotate_toggle(self, event) -> None:
@@ -2557,14 +2763,22 @@ class OOIDashboard(param.Parameterized):
                 ))
 
     def _build_main(self) -> pn.Column:
-        anno_toolbar = pn.Row(
-            self._btn_annotate,
-            self._btn_add_anno,
-            self._btn_del_anno,
-            self._btn_save_draft,
-            self._btn_load_draft,
-            self._btn_export_anno,
-            self._btn_export_dels,
+        anno_toolbar = pn.Column(
+            pn.Row(
+                self._btn_fetch_anno,
+                self._btn_load_anno_csv,
+                self._w_anno_path_display,
+                self._btn_export_anno,
+                self._btn_export_dels,
+            ),
+            pn.Row(
+                self._btn_annotate,
+                self._btn_add_anno,
+                self._btn_del_anno,
+                self._btn_find_gaps,
+                self._w_gap_threshold,
+                pn.pane.Markdown("Min gap (hours)", margin=(-12, 0, 0, 0)),
+            ),
         )
         return pn.Column(
             pn.Card(
@@ -2594,6 +2808,9 @@ class OOIDashboard(param.Parameterized):
 
 def main() -> None:
     """Launch the OOI HITL QC dashboard."""
+    import sys
+    logger.remove()
+    logger.add(sys.stderr, level="DEBUG" if DEBUG else "INFO")
     if LAST_CONFIG_PATH_FILE.exists():
         try:
             _last = LAST_CONFIG_PATH_FILE.read_text().strip()
